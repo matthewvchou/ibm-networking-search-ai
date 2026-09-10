@@ -1,0 +1,2 @@
+class BluepagesUnavailableException(Exception):
+    pass
