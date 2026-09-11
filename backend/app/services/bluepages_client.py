@@ -12,13 +12,15 @@ class BluepagesClient:
     def __init__(self, base_url: str | None = None, timeout: float | None = None) -> None:
         self._base_url = base_url or settings.bluepages_base_url
         self._timeout = timeout or settings.bluepages_timeout_seconds
+        # Reused across calls so concurrent org-chart requests share a connection pool
+        # instead of paying a fresh TCP/TLS handshake per Bluepages call.
+        self._http_client = httpx.AsyncClient(timeout=self._timeout)
 
     async def query(self, method: str, value: str) -> list[dict[str, str]]:
         url = f"{self._base_url}/wsapi"
         try:
-            async with httpx.AsyncClient(timeout=self._timeout) as client:
-                response = await client.get(url, params={method: value})
-                response.raise_for_status()
+            response = await self._http_client.get(url, params={method: value})
+            response.raise_for_status()
         except httpx.HTTPError as exc:
             raise BluepagesUnavailableException(str(exc)) from exc
 
@@ -27,9 +29,8 @@ class BluepagesClient:
     async def ping(self) -> bool:
         url = f"{self._base_url}/wsapi"
         try:
-            async with httpx.AsyncClient(timeout=self._timeout) as client:
-                response = await client.get(url)
-                response.raise_for_status()
+            response = await self._http_client.get(url)
+            response.raise_for_status()
         except httpx.HTTPError:
             return False
         return True

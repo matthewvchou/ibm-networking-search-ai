@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
-import type { Employee } from './api/client'
-import { getDirectReports, getEmployee, getManagerChain, searchEmployees } from './api/client'
+import type { Employee, OrgNode } from './api/client'
+import { getEmployee, getManagerChain, getOrgChart, searchEmployees } from './api/client'
+import { OrgChart } from './components/OrgChart'
 
 function errorMessage(err: unknown): string {
   if (err instanceof Error) {
@@ -31,7 +32,7 @@ function App() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [employee, setEmployee] = useState<Employee | null>(null)
   const [managerChain, setManagerChain] = useState<Employee[]>([])
-  const [directReports, setDirectReports] = useState<Employee[]>([])
+  const [orgChart, setOrgChart] = useState<OrgNode | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
   const [detailError, setDetailError] = useState<string | null>(null)
 
@@ -60,16 +61,16 @@ function App() {
     setDetailError(null)
     setEmployee(null)
     setManagerChain([])
-    setDirectReports([])
+    setOrgChart(null)
     try {
-      const [emp, chain, reports] = await Promise.all([
+      const [emp, chain, chart] = await Promise.all([
         getEmployee(id),
         getManagerChain(id),
-        getDirectReports(id),
+        getOrgChart(id, 2),
       ])
       setEmployee(emp)
       setManagerChain(chain.chain)
-      setDirectReports(reports.reports)
+      setOrgChart(chart)
     } catch (err) {
       setDetailError(errorMessage(err))
     } finally {
@@ -123,22 +124,15 @@ function App() {
               </p>
               <p>{employee.email ?? 'no email'}</p>
 
-              <h3>Manager chain</h3>
-              <ul style={{ display: 'flex', gap: 8, listStyle: 'none', padding: 0, flexWrap: 'wrap' }}>
-                {managerChain.map((m, i) => (
-                  <li key={m.id}>
-                    <button onClick={() => selectEmployee(m.id)}>{m.display_name}</button>
-                    {i < managerChain.length - 1 ? ' →' : ''}
-                  </li>
-                ))}
-              </ul>
-
-              <h3>Direct reports ({directReports.length})</h3>
-              <ul>
-                {directReports.map((r) => (
-                  <EmployeeRow key={r.id} employee={r} onSelect={selectEmployee} />
-                ))}
-              </ul>
+              <h3>Org chart</h3>
+              {orgChart && (
+                <OrgChart
+                  managerChain={managerChain}
+                  orgNode={orgChart}
+                  selectedId={employee.id}
+                  onSelect={selectEmployee}
+                />
+              )}
             </>
           )}
         </div>
