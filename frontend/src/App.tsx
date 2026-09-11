@@ -1,8 +1,10 @@
-import { useState } from 'react'
-import type { FormEvent } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Employee, OrgNode } from './api/client'
 import { getEmployee, getManagerChain, getOrgChart, searchEmployees } from './api/client'
 import { OrgChart } from './components/OrgChart'
+
+const SEARCH_DEBOUNCE_MS = 300
+const MIN_QUERY_LENGTH = 3
 
 function errorMessage(err: unknown): string {
   if (err instanceof Error) {
@@ -28,6 +30,7 @@ function App() {
   const [results, setResults] = useState<Employee[]>([])
   const [truncated, setTruncated] = useState(false)
   const [searchError, setSearchError] = useState<string | null>(null)
+  const [searchLoading, setSearchLoading] = useState(false)
 
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [employee, setEmployee] = useState<Employee | null>(null)
@@ -36,24 +39,41 @@ function App() {
   const [detailLoading, setDetailLoading] = useState(false)
   const [detailError, setDetailError] = useState<string | null>(null)
 
-  async function handleSearch(e: FormEvent) {
-    e.preventDefault()
-    setSearchError(null)
-    if (!query.trim()) {
-      setResults([])
-      setTruncated(false)
+  const abortRef = useRef<AbortController | null>(null)
+  const trimmedQuery = query.trim()
+  const searchActive = trimmedQuery.length >= MIN_QUERY_LENGTH
+  const showKeepTyping = trimmedQuery.length > 0 && !searchActive
+
+  useEffect(() => {
+    if (trimmedQuery.length < MIN_QUERY_LENGTH) {
+      abortRef.current?.abort()
       return
     }
-    try {
-      const data = await searchEmployees(query.trim())
-      setResults(data.results)
-      setTruncated(data.truncated)
-    } catch (err) {
-      setResults([])
-      setTruncated(false)
-      setSearchError(errorMessage(err))
-    }
-  }
+
+    const timeoutId = setTimeout(() => {
+      abortRef.current?.abort()
+      const controller = new AbortController()
+      abortRef.current = controller
+      setSearchLoading(true)
+      setSearchError(null)
+      searchEmployees(trimmedQuery, controller.signal)
+        .then((data) => {
+          setResults(data.results)
+          setTruncated(data.truncated)
+        })
+        .catch((err: unknown) => {
+          if (err instanceof Error && err.name === 'AbortError') return
+          setResults([])
+          setTruncated(false)
+          setSearchError(errorMessage(err))
+        })
+        .finally(() => {
+          setSearchLoading(false)
+        })
+    }, SEARCH_DEBOUNCE_MS)
+
+    return () => clearTimeout(timeoutId)
+  }, [trimmedQuery])
 
   async function selectEmployee(id: string) {
     setSelectedId(id)
@@ -82,33 +102,32 @@ function App() {
     <div style={{ maxWidth: 900, margin: '0 auto', padding: 24, fontFamily: 'sans-serif' }}>
       <h1>IBM Directory (test harness)</h1>
 
-      <form onSubmit={handleSearch} style={{ marginBottom: 16 }}>
+      <form onSubmit={(e) => e.preventDefault()} style={{ marginBottom: 16 }}>
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder='Search by name (e.g. "Chou, Matthew" or last name only)…'
           style={{ padding: 8, width: 300 }}
         />
-        <button type="submit" style={{ padding: 8, marginLeft: 8 }}>
-          Search
-        </button>
+        {searchActive && searchLoading && <span style={{ marginLeft: 8, color: '#666' }}>Searching…</span>}
       </form>
 
       <p style={{ fontSize: 12, color: '#666' }}>
-        A single word matches last name. For a specific person, use "Last, First" or "First Last".
+        A single word matches first or last name. For a specific person, use "Last, First" or "First Last".
       </p>
 
-      {searchError && <p style={{ color: 'crimson' }}>{searchError}</p>}
-      {!searchError && results.length === 0 && query && (
+      {searchActive && searchError && <p style={{ color: 'crimson' }}>{searchError}</p>}
+      {showKeepTyping && <p>Keep typing… (min {MIN_QUERY_LENGTH} characters)</p>}
+      {searchActive && !searchError && results.length === 0 && (
         <p>
           No results.
-          {!query.trim().includes(' ') && !query.trim().includes(',') && (
-            <> Try adding a first name, e.g. "{query.trim()} Firstname" or "{query.trim()}, Firstname".</>
+          {!trimmedQuery.includes(' ') && !trimmedQuery.includes(',') && (
+            <> Try a full name, e.g. "{trimmedQuery} Lastname" or "Lastname, {trimmedQuery}".</>
           )}
         </p>
       )}
 
-      {results.length > 0 && (
+      {searchActive && results.length > 0 && (
         <>
           {truncated && <p><em>Results truncated.</em></p>}
           <ul>

@@ -28,8 +28,8 @@ export interface OrgNode {
   has_more_reports: boolean
 }
 
-async function get<T>(path: string): Promise<T> {
-  const res = await fetch(path)
+async function get<T>(path: string, signal?: AbortSignal): Promise<T> {
+  const res = await fetch(path, { signal })
   if (!res.ok) {
     if (res.status === 404) {
       throw new Error('not-found')
@@ -42,8 +42,8 @@ async function get<T>(path: string): Promise<T> {
   return res.json() as Promise<T>
 }
 
-export function searchEmployees(query: string): Promise<SearchResponse> {
-  return get<SearchResponse>(`/api/employees/search?q=${encodeURIComponent(query)}`)
+export function searchEmployees(query: string, signal?: AbortSignal): Promise<SearchResponse> {
+  return get<SearchResponse>(`/api/employees/search?q=${encodeURIComponent(query)}`, signal)
 }
 
 export function getEmployee(id: string): Promise<Employee> {

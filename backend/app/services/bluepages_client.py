@@ -16,10 +16,15 @@ class BluepagesClient:
         # instead of paying a fresh TCP/TLS handshake per Bluepages call.
         self._http_client = httpx.AsyncClient(timeout=self._timeout)
 
-    async def query(self, method: str, value: str) -> list[dict[str, str]]:
+    async def query(self, method: str, value: str, timeout: float | None = None) -> list[dict[str, str]]:
         url = f"{self._base_url}/wsapi"
+        request_kwargs = {"params": {method: value}}
+        if timeout is not None:
+            # Per-request override on the shared client, e.g. for riskier queries
+            # that shouldn't wait as long as the default before giving up.
+            request_kwargs["timeout"] = timeout
         try:
-            response = await self._http_client.get(url, params={method: value})
+            response = await self._http_client.get(url, **request_kwargs)
             response.raise_for_status()
         except httpx.HTTPError as exc:
             raise BluepagesUnavailableException(str(exc)) from exc
