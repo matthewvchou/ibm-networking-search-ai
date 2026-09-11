@@ -17,3 +17,4 @@ class Employee(BaseModel):
 class OrgNode(BaseModel):
     employee: Employee
     direct_reports: list["OrgNode"] = []
+    has_more_reports: bool = False

@@ -1,6 +1,10 @@
+import asyncio
+
 from app.core.config import settings
-from app.models.employee import Employee
+from app.models.employee import Employee, OrgNode
 from app.services.bluepages_client import BluepagesClient
+
+_ORG_CHART_CONCURRENCY = 16
 
 
 def _record_to_employee(record: dict[str, str]) -> Employee:
@@ -43,3 +47,22 @@ class EmployeeService:
         records = await self._client.query("managerChainFor", employee_id)
         chain = [_record_to_employee(r) for r in records]
         return [self_employee, *chain]
+
+    async def get_org_chart(self, employee_id: str, depth: int = 2) -> OrgNode | None:
+        root_employee = await self.get_by_id(employee_id)
+        if root_employee is None:
+            return None
+        semaphore = asyncio.Semaphore(_ORG_CHART_CONCURRENCY)
+        return await self._build_org_node(root_employee, depth, semaphore)
+
+    async def _build_org_node(
+        self, employee: Employee, remaining_depth: int, semaphore: asyncio.Semaphore
+    ) -> OrgNode:
+        async with semaphore:
+            reports = await self.get_direct_reports(employee.id)
+        if remaining_depth <= 0:
+            return OrgNode(employee=employee, direct_reports=[], has_more_reports=len(reports) > 0)
+        children = await asyncio.gather(
+            *(self._build_org_node(r, remaining_depth - 1, semaphore) for r in reports)
+        )
+        return OrgNode(employee=employee, direct_reports=list(children), has_more_reports=False)

@@ -22,6 +22,12 @@ interface ManagerChainResponse {
   chain: Employee[]
 }
 
+export interface OrgNode {
+  employee: Employee
+  direct_reports: OrgNode[]
+  has_more_reports: boolean
+}
+
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(path)
   if (!res.ok) {
@@ -50,4 +56,8 @@ export function getDirectReports(id: string): Promise<DirectReportsResponse> {
 
 export function getManagerChain(id: string): Promise<ManagerChainResponse> {
   return get<ManagerChainResponse>(`/api/employees/${encodeURIComponent(id)}/manager-chain`)
+}
+
+export function getOrgChart(id: string, depth = 2): Promise<OrgNode> {
+  return get<OrgNode>(`/api/employees/${encodeURIComponent(id)}/org-chart?depth=${depth}`)
 }

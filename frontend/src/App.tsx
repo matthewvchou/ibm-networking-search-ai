@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
-import type { Employee } from './api/client'
-import { getDirectReports, getEmployee, getManagerChain, searchEmployees } from './api/client'
+import type { Employee, OrgNode } from './api/client'
+import { getEmployee, getManagerChain, getOrgChart, searchEmployees } from './api/client'
+import { OrgChart } from './components/OrgChart'
 
 function errorMessage(err: unknown): string {
   if (err instanceof Error) {
@@ -31,7 +32,7 @@ function App() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [employee, setEmployee] = useState<Employee | null>(null)
   const [managerChain, setManagerChain] = useState<Employee[]>([])
-  const [directReports, setDirectReports] = useState<Employee[]>([])
+  const [orgChart, setOrgChart] = useState<OrgNode | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
   const [detailError, setDetailError] = useState<string | null>(null)
 
@@ -60,16 +61,16 @@ function App() {
     setDetailError(null)
     setEmployee(null)
     setManagerChain([])
-    setDirectReports([])
+    setOrgChart(null)
     try {
-      const [emp, chain, reports] = await Promise.all([
+      const [emp, chain, chart] = await Promise.all([
         getEmployee(id),
         getManagerChain(id),
-        getDirectReports(id),
+        getOrgChart(id, 2),
       ])
       setEmployee(emp)
       setManagerChain(chain.chain)
-      setDirectReports(reports.reports)
+      setOrgChart(chart)
     } catch (err) {
       setDetailError(errorMessage(err))
     } finally {
@@ -85,7 +86,7 @@ function App() {
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search by name…"
+          placeholder='Search by name (e.g. "Chou, Matthew" or last name only)…'
           style={{ padding: 8, width: 300 }}
         />
         <button type="submit" style={{ padding: 8, marginLeft: 8 }}>
@@ -93,8 +94,19 @@ function App() {
         </button>
       </form>
 
+      <p style={{ fontSize: 12, color: '#666' }}>
+        A single word matches last name. For a specific person, use "Last, First" or "First Last".
+      </p>
+
       {searchError && <p style={{ color: 'crimson' }}>{searchError}</p>}
-      {!searchError && results.length === 0 && query && <p>No results.</p>}
+      {!searchError && results.length === 0 && query && (
+        <p>
+          No results.
+          {!query.trim().includes(' ') && !query.trim().includes(',') && (
+            <> Try adding a first name, e.g. "{query.trim()} Firstname" or "{query.trim()}, Firstname".</>
+          )}
+        </p>
+      )}
 
       {results.length > 0 && (
         <>
@@ -123,22 +135,15 @@ function App() {
               </p>
               <p>{employee.email ?? 'no email'}</p>
 
-              <h3>Manager chain</h3>
-              <ul style={{ display: 'flex', gap: 8, listStyle: 'none', padding: 0, flexWrap: 'wrap' }}>
-                {managerChain.map((m, i) => (
-                  <li key={m.id}>
-                    <button onClick={() => selectEmployee(m.id)}>{m.display_name}</button>
-                    {i < managerChain.length - 1 ? ' →' : ''}
-                  </li>
-                ))}
-              </ul>
-
-              <h3>Direct reports ({directReports.length})</h3>
-              <ul>
-                {directReports.map((r) => (
-                  <EmployeeRow key={r.id} employee={r} onSelect={selectEmployee} />
-                ))}
-              </ul>
+              <h3>Org chart</h3>
+              {orgChart && (
+                <OrgChart
+                  managerChain={managerChain}
+                  orgNode={orgChart}
+                  selectedId={employee.id}
+                  onSelect={selectEmployee}
+                />
+              )}
             </>
           )}
         </div>
