@@ -8,14 +8,6 @@ An internal IBM employee-directory / org-chart tool. v1 scope is **just Bluepage
 
 Monorepo: `backend/` (Python/FastAPI) + `frontend/` (Vite/React/TypeScript). One repo, not two — the two halves are built in lockstep by a single developer.
 
-## Dev servers are already running
-
-Backend and frontend dev servers are typically already running in this environment — check before starting new ones (a second `uvicorn`/`vite` on the same port will just fail to bind, or Vite will silently fall back to a different port):
-- Backend: `http://127.0.0.1:8000` (docs at `/docs`)
-- Frontend: `http://localhost:5175/`
-
-If a change isn't showing up, prefer restarting the existing process over assuming it's not running (see the Windows `--reload` note below).
-
 ## Commands
 
 ### Backend (`backend/`)
