@@ -86,7 +86,7 @@ function App() {
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search by name…"
+          placeholder='Search by name (e.g. "Chou, Matthew" or last name only)…'
           style={{ padding: 8, width: 300 }}
         />
         <button type="submit" style={{ padding: 8, marginLeft: 8 }}>
@@ -94,8 +94,19 @@ function App() {
         </button>
       </form>
 
+      <p style={{ fontSize: 12, color: '#666' }}>
+        A single word matches last name. For a specific person, use "Last, First" or "First Last".
+      </p>
+
       {searchError && <p style={{ color: 'crimson' }}>{searchError}</p>}
-      {!searchError && results.length === 0 && query && <p>No results.</p>}
+      {!searchError && results.length === 0 && query && (
+        <p>
+          No results.
+          {!query.trim().includes(' ') && !query.trim().includes(',') && (
+            <> Try adding a first name, e.g. "{query.trim()} Firstname" or "{query.trim()}, Firstname".</>
+          )}
+        </p>
+      )}
 
       {results.length > 0 && (
         <>

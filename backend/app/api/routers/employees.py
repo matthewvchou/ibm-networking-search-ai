@@ -9,7 +9,10 @@ _service = EmployeeService()
 
 @router.get("/search")
 async def search(q: str, limit: int = 50) -> dict:
-    results, truncated = await _service.search(q, limit)
+    if not q.strip():
+        raise HTTPException(status_code=422, detail="q must not be empty")
+    clamped_limit = max(1, min(limit, 100))
+    results, truncated = await _service.search(q, clamped_limit)
     return {"results": results, "truncated": truncated}
 
 
