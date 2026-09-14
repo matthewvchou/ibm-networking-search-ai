@@ -64,13 +64,21 @@ class BluepagesClient:
 
         records: list[dict[str, str]] = []
         current: dict[str, str] | None = None
+        # Employee-shaped responses (byCnum, allByNameFuzzy, directReportsOf, ...) key
+        # each record's start on "CNUM:". Reference-lookup responses (workLoc, orgCodes,
+        # ...) have no CNUM at all and instead repeat their own first field per record
+        # (e.g. "WORKLOC:", "ORGCODE:"). Treat the first field name seen as the record
+        # delimiter, since it's always the one that repeats once per record either way.
+        record_key: str | None = None
         for line in record_lines:
             if not line.strip() or ":" not in line:
                 continue
             key, _, value = line.partition(":")
             key = key.strip()
             value = value.strip()
-            if key == "CNUM":
+            if record_key is None:
+                record_key = key
+            if key == record_key:
                 current = {}
                 records.append(current)
             if current is not None:

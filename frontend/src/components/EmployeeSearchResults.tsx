@@ -1,6 +1,10 @@
-import { ClickableTile, InlineNotification, SkeletonText } from '@carbon/react'
+import { useState } from 'react'
+import { ClickableTile, InlineNotification, PaginationNav, SkeletonText } from '@carbon/react'
 import { useNavigate } from 'react-router'
 import type { Employee } from '../api/client'
+import { formatDisplayName } from '../utils/formatName'
+
+const PAGE_SIZE = 10
 
 interface EmployeeSearchResultsProps {
   query: string
@@ -12,6 +16,17 @@ interface EmployeeSearchResultsProps {
 
 export function EmployeeSearchResults({ query, loading, error, results, truncated }: EmployeeSearchResultsProps) {
   const navigate = useNavigate()
+  const [page, setPage] = useState(0)
+  const [resultsForPage, setResultsForPage] = useState(results)
+
+  if (results !== resultsForPage) {
+    setResultsForPage(results)
+    setPage(0)
+  }
+
+  const sortedResults = [...results].sort((a, b) => a.display_name.localeCompare(b.display_name))
+  const pageCount = Math.ceil(sortedResults.length / PAGE_SIZE)
+  const pageResults = sortedResults.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE)
 
   if (loading) {
     return (
@@ -51,15 +66,25 @@ export function EmployeeSearchResults({ query, loading, error, results, truncate
         />
       )}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {results.map((employee) => (
-          <ClickableTile key={employee.id} onClick={() => navigate(`/employee/${employee.id}`)}>
-            <div style={{ fontWeight: 600 }}>{employee.display_name}</div>
+        {pageResults.map((employee) => (
+          <ClickableTile
+            key={employee.id}
+            onClick={() =>
+              navigate(`/employee/${employee.id}${query ? `?q=${encodeURIComponent(query)}` : ''}`)
+            }
+          >
+            <div style={{ fontWeight: 600 }}>{formatDisplayName(employee.display_name)}</div>
             <div style={{ fontSize: 14 }}>
               {[employee.title, employee.department, employee.location].filter(Boolean).join(' · ') || 'No details available'}
             </div>
           </ClickableTile>
         ))}
       </div>
+      {pageCount > 1 && (
+        <div style={{ marginTop: 16, display: 'flex', justifyContent: 'center' }}>
+          <PaginationNav page={page} totalItems={pageCount} onChange={setPage} />
+        </div>
+      )}
     </div>
   )
 }
