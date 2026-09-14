@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { InlineNotification, SkeletonText } from '@carbon/react'
-import { useNavigate, useParams } from 'react-router'
+import { InlineNotification, Link, SkeletonText } from '@carbon/react'
+import { Link as RouterLink, useNavigate, useParams, useSearchParams } from 'react-router'
 import { getEmployee, getManagerChain, getOrgChart } from '../api/client'
 import type { Employee, OrgNode } from '../api/client'
 import { errorMessage } from '../api/errors'
@@ -10,6 +10,8 @@ import { OrgChart } from '../components/OrgChart'
 export function EmployeeDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const q = searchParams.get('q')
 
   const [employee, setEmployee] = useState<Employee | null>(null)
   const [managerChain, setManagerChain] = useState<Employee[]>([])
@@ -46,12 +48,22 @@ export function EmployeeDetailPage() {
 
   return (
     <div style={{ maxWidth: 900, margin: '0 auto', padding: 24 }}>
-      {loading && <SkeletonText paragraph lineCount={3} />}
+      <Link as={RouterLink} to={q ? `/?q=${encodeURIComponent(q)}` : '/'}>
+        {q ? '← Back to search results' : '← Back to search'}
+      </Link>
+
+      {loading && (
+        <div style={{ marginTop: 16 }}>
+          <SkeletonText paragraph lineCount={3} />
+        </div>
+      )}
       {error && <InlineNotification kind="error" title="Couldn't load employee" subtitle={error} hideCloseButton />}
 
       {employee && (
         <>
-          <EmployeeProfile employee={employee} />
+          <div style={{ marginTop: 16 }}>
+            <EmployeeProfile employee={employee} manager={managerChain[1] ?? null} q={q} />
+          </div>
 
           <h3 style={{ marginTop: 24 }}>Org chart</h3>
           {orgChart && (
@@ -59,7 +71,9 @@ export function EmployeeDetailPage() {
               managerChain={managerChain}
               orgNode={orgChart}
               selectedId={employee.id}
-              onSelect={(selectedId) => navigate(`/employee/${selectedId}`)}
+              onSelect={(selectedId) =>
+                navigate(`/employee/${selectedId}${q ? `?q=${encodeURIComponent(q)}` : ''}`)
+              }
             />
           )}
         </>

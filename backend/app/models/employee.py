@@ -12,6 +12,10 @@ class Employee(BaseModel):
     location: str | None = None
     manager_id: str | None = None
     photo_url: str | None = None
+    office_phone: str | None = None
+    mobile_phone: str | None = None
+    address: str | None = None
+    org_unit: str | None = None
 
 
 class OrgNode(BaseModel):

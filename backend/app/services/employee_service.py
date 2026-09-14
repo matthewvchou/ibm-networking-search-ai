@@ -20,6 +20,17 @@ def _record_to_employee(record: dict[str, str]) -> Employee:
     )
 
 
+async def _none() -> None:
+    return None
+
+
+def _format_address(record: dict[str, str]) -> str | None:
+    street = ", ".join(p for p in (record.get("ADDRESS1"), record.get("ADDRESS2")) if p)
+    city_state_zip = " ".join(p for p in (record.get("CITY"), record.get("STATE"), record.get("ZIPCODE")) if p)
+    parts = [p for p in (street, city_state_zip, record.get("C")) if p]
+    return ", ".join(parts) or None
+
+
 class EmployeeService:
     def __init__(self, client: BluepagesClient | None = None) -> None:
         self._client = client or BluepagesClient()
@@ -77,6 +88,46 @@ class EmployeeService:
         if not records:
             return None
         return _record_to_employee(records[0])
+
+    async def get_enriched_by_id(self, employee_id: str) -> Employee | None:
+        records = await self._client.query("byCnum", employee_id)
+        if not records:
+            return None
+        record = records[0]
+        employee = _record_to_employee(record)
+
+        work_loc = record.get("WORKLOC")
+        org_code = record.get("ORGCODE")
+        address, org_unit = await asyncio.gather(
+            self._resolve_address(work_loc) if work_loc else _none(),
+            self._resolve_org_unit(org_code) if org_code else _none(),
+        )
+
+        employee.office_phone = record.get("XPHONE") or None
+        employee.mobile_phone = record.get("CELLULAR") or None
+        employee.address = address
+        employee.org_unit = org_unit
+        return employee
+
+    async def _resolve_address(self, work_loc: str) -> str | None:
+        try:
+            records = await self._client.query("workLoc", work_loc)
+        except BluepagesUnavailableException:
+            # Secondary lookup for the profile card only — degrade gracefully
+            # rather than failing the whole employee detail request.
+            return None
+        if not records:
+            return None
+        return _format_address(records[0])
+
+    async def _resolve_org_unit(self, org_code: str) -> str | None:
+        try:
+            records = await self._client.query("orgCodes", org_code)
+        except BluepagesUnavailableException:
+            return None
+        if not records:
+            return None
+        return records[0].get("ORGDISPLAY") or None
 
     async def get_direct_reports(self, employee_id: str) -> list[Employee]:
         records = await self._client.query("directReportsOf", employee_id)

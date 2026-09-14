@@ -7,6 +7,10 @@ export interface Employee {
   location: string | null
   manager_id: string | null
   photo_url: string | null
+  office_phone: string | null
+  mobile_phone: string | null
+  address: string | null
+  org_unit: string | null
 }
 
 interface SearchResponse {

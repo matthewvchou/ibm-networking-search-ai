@@ -18,7 +18,7 @@ async def search(q: str, limit: int = 50) -> dict:
 
 @router.get("/{employee_id}", response_model=Employee)
 async def get_by_id(employee_id: str) -> Employee:
-    employee = await _service.get_by_id(employee_id)
+    employee = await _service.get_enriched_by_id(employee_id)
     if employee is None:
         raise HTTPException(status_code=404, detail="Employee not found")
     return employee

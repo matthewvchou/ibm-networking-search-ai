@@ -2,10 +2,11 @@ import { useEffect, useRef, useState } from 'react'
 import Tree from 'react-d3-tree'
 import type { CustomNodeElementProps, RawNodeDatum } from 'react-d3-tree'
 import type { Employee, OrgNode } from '../api/client'
+import { formatDisplayName } from '../utils/formatName'
 
 function orgNodeToRaw(node: OrgNode): RawNodeDatum {
   return {
-    name: node.employee.display_name,
+    name: formatDisplayName(node.employee.display_name),
     attributes: {
       id: node.employee.id,
       title: node.employee.title ?? '',
@@ -20,7 +21,7 @@ function buildTreeData(managerChain: Employee[], orgNode: OrgNode): RawNodeDatum
   const rootDescendant = orgNodeToRaw(orgNode)
   return ancestors.reduceRight<RawNodeDatum>(
     (child, ancestor) => ({
-      name: ancestor.display_name,
+      name: formatDisplayName(ancestor.display_name),
       attributes: { id: ancestor.id, title: ancestor.title ?? '', hasMore: false },
       children: [child],
     }),
