@@ -1,11 +1,13 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
-import { Header, HeaderName, Search } from '@carbon/react'
-import { Link, useLocation, useNavigate } from 'react-router'
+import { Header, HeaderName, Link as CarbonLink, Search } from '@carbon/react'
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router'
 
 export function AppHeader() {
   const location = useLocation()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const q = searchParams.get('q')
   const [inputValue, setInputValue] = useState('')
 
   function handleSubmit(e: FormEvent) {
@@ -13,6 +15,8 @@ export function AppHeader() {
     const trimmed = inputValue.trim()
     navigate(trimmed ? `/?q=${encodeURIComponent(trimmed)}` : '/')
   }
+
+  const isEmployeeDetail = location.pathname.startsWith('/employee/')
 
   return (
     <Header aria-label="IBM Directory">
@@ -30,6 +34,15 @@ export function AppHeader() {
             onChange={(e) => setInputValue(e.target.value)}
           />
         </form>
+      )}
+      {isEmployeeDetail && (
+        <CarbonLink
+          as={Link}
+          to={q ? `/?q=${encodeURIComponent(q)}` : '/'}
+          style={{ marginLeft: 'auto', marginRight: 16, whiteSpace: 'nowrap' }}
+        >
+          {q ? '← Back to search results' : '← Back to search'}
+        </CarbonLink>
       )}
     </Header>
   )
