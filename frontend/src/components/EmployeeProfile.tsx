@@ -14,7 +14,13 @@ export function EmployeeProfile({ employee, manager, q }: EmployeeProfileProps) 
     <Tile>
       <h2 style={{ margin: 0 }}>{formatDisplayName(employee.display_name)}</h2>
       <p style={{ marginTop: 4 }}>
-        {[employee.title, employee.department, employee.org_unit, employee.location]
+        {[
+          employee.title,
+          employee.department_name ?? employee.department,
+          employee.org_unit,
+          employee.location,
+          employee.employee_type,
+        ]
           .filter(Boolean)
           .join(' · ') || 'No details available'}
       </p>
@@ -25,6 +31,7 @@ export function EmployeeProfile({ employee, manager, q }: EmployeeProfileProps) 
       {employee.mobile_phone && (
         <p style={{ marginTop: 4 }}>Mobile: <a href={`tel:${employee.mobile_phone}`}>{employee.mobile_phone}</a></p>
       )}
+      {employee.company && <p style={{ marginTop: 4 }}>{employee.company}</p>}
       {employee.address && <p style={{ marginTop: 4 }}>{employee.address}</p>}
       {manager && (
         <p style={{ marginTop: 4 }}>

@@ -11,6 +11,11 @@ _ORG_CHART_CONCURRENCY = 16
 
 _MANAGER_DN_UID_RE = re.compile(r"uid=([^,]+)", re.IGNORECASE)
 
+# ibmperson.department is documented only as "DN of department entry" - the ED
+# schema pages we have don't cover that entry's object class, so the readable
+# name could live under any of these. First populated one wins.
+_DEPT_NAME_ATTRS = ("description", "hrorganizationdisplay", "hrorganizationname", "ou", "cn")
+
 
 def _record_to_employee(record: dict[str, str]) -> Employee:
     return Employee(
@@ -144,34 +149,80 @@ class EmployeeService:
         work_loc = record.get("workloc")
         building = record.get("buildingname")
         org_code = record.get("hrorganizationcode")
-        address, org_unit = await asyncio.gather(
+        type_code = record.get("employeetype")
+        company_code = record.get("hrcompanycode")
+        department_dn = record.get("department")
+        address, org_unit, employee_type, company, department_name = await asyncio.gather(
             self._resolve_address(work_loc, building) if work_loc else _none(),
             self._resolve_org_unit(org_code) if org_code else _none(),
+            self._resolve_employee_type(type_code) if type_code else _none(),
+            self._resolve_company(company_code) if company_code else _none(),
+            self._resolve_department_name(department_dn) if department_dn else _none(),
         )
 
         employee.address = address
         employee.org_unit = org_unit
+        # employeetype may not be a code at all - fall back to the raw value.
+        employee.employee_type = employee_type or type_code or None
+        employee.company = company
+        employee.department_name = department_name
         return employee
 
-    async def _resolve_address(self, work_loc: str, building: str | None = None) -> str | None:
+    async def _lookup(
+        self, object_class: str, filter_expr: str, search_params: str | None = None
+    ) -> dict[str, str] | None:
+        # Shared plumbing for the code -> readable-label lookups that enrich the
+        # profile card. These are all secondary to the main ibmperson record, so a
+        # directory error degrades to "no label" rather than failing the whole
+        # employee detail request. Note this also swallows malformed-filter errors
+        # (rc 904/923), which then look identical to "no such entry" — re-raise
+        # here temporarily when developing a new filter.
         try:
-            records = await self._slaphapi_client.query("ibmworklocation", f"workLoc={work_loc}")
+            records = await self._slaphapi_client.query(
+                object_class, filter_expr, search_params=search_params
+            )
         except BluepagesUnavailableException:
-            # Secondary lookup for the profile card only — degrade gracefully
-            # rather than failing the whole employee detail request.
             return None
-        if not records:
+        return records[0] if records else None
+
+    async def _resolve_address(self, work_loc: str, building: str | None = None) -> str | None:
+        record = await self._lookup("ibmworklocation", f"workLoc={work_loc}")
+        if record is None:
             return None
-        return _format_address_slaphapi(records[0], building)
+        return _format_address_slaphapi(record, building)
 
     async def _resolve_org_unit(self, org_code: str) -> str | None:
-        try:
-            records = await self._slaphapi_client.query("ibmorganization", f"hrOrganizationCode={org_code}")
-        except BluepagesUnavailableException:
+        record = await self._lookup("ibmorganization", f"hrOrganizationCode={org_code}")
+        if record is None:
             return None
-        if not records:
+        return record.get("hrorganizationdisplay") or record.get("hrorganizationname") or None
+
+    async def _resolve_employee_type(self, type_code: str) -> str | None:
+        # ibmperson.employeetype may already hold a readable string rather than a
+        # code, in which case this lookup simply misses and the caller falls back
+        # to the raw value.
+        record = await self._lookup("ibmemployeetype", f"employeeTypeCode={type_code}")
+        if record is None:
             return None
-        return records[0].get("hrorganizationdisplay") or records[0].get("hrorganizationname") or None
+        # `title` is the short user-facing label ("IBM employee, Regular");
+        # `description` is a paragraph of internal notes about the code, so it is
+        # not a usable fallback for display.
+        return record.get("title") or None
+
+    async def _resolve_company(self, company_code: str) -> str | None:
+        record = await self._lookup("ibmcompany", f"hrCompanyCode={company_code}")
+        if record is None:
+            return None
+        return record.get("hrcompanyname") or None
+
+    async def _resolve_department_name(self, department_dn: str) -> str | None:
+        # Keyed by DN, not by code: the DN goes in the object position with the
+        # "base" search parameter, which scopes the search to that entry alone and
+        # means we don't need to know its object class.
+        record = await self._lookup(department_dn, "objectclass=*", search_params="base")
+        if record is None:
+            return None
+        return next((record[attr] for attr in _DEPT_NAME_ATTRS if record.get(attr)), None)
 
     async def get_direct_reports(self, employee_id: str) -> list[Employee]:
         records = await self._client.query("directReportsOf", employee_id)

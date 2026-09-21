@@ -11,6 +11,10 @@ export interface Employee {
   mobile_phone: string | null
   address: string | null
   org_unit: string | null
+  // Only populated by the enriched single-employee endpoint; `department` is the raw code.
+  employee_type: string | null
+  company: string | null
+  department_name: string | null
 }
 
 interface SearchResponse {
