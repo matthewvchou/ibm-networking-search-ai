@@ -9,3 +9,8 @@
 body {
   margin: 0;
 }
+
+.org-chart-canvas .rd3t-link {
+  stroke: var(--border);
+  stroke-width: 1.5px;
+}
