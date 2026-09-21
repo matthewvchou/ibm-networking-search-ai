@@ -16,6 +16,11 @@ class Employee(BaseModel):
     mobile_phone: str | None = None
     address: str | None = None
     org_unit: str | None = None
+    # Resolved from codes on the ibmperson record; only populated on the enriched
+    # single-employee endpoint, so `department` stays the raw code.
+    employee_type: str | None = None
+    company: str | None = None
+    department_name: str | None = None
 
 
 class OrgNode(BaseModel):

@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { Button, Tag, Tile } from '@carbon/react'
-import { Email, Launch, Location, Mobile, Phone, UserFollow } from '@carbon/icons-react'
+import { Email, Enterprise, Launch, Location, Mobile, Phone, UserFollow } from '@carbon/icons-react'
 import { Link as RouterLink } from 'react-router'
 import type { Employee } from '../api/client'
 import { formatDisplayName } from '../utils/formatName'
@@ -21,6 +21,8 @@ function DetailRow({ icon, children }: { icon: ReactNode; children: ReactNode })
 }
 
 export function EmployeeProfile({ employee, manager, q }: EmployeeProfileProps) {
+  const department = employee.department_name ?? employee.department
+
   const managerLink = manager && (
     <RouterLink to={`/employee/${manager.id}${q ? `?q=${encodeURIComponent(q)}` : ''}`}>
       {formatDisplayName(manager.display_name)}
@@ -54,11 +56,12 @@ export function EmployeeProfile({ employee, manager, q }: EmployeeProfileProps) 
         </Button>
       </div>
 
-      {(employee.department || employee.org_unit || employee.location) && (
+      {(department || employee.org_unit || employee.location || employee.employee_type) && (
         <div style={{ marginTop: 12, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-          {employee.department && <Tag type="blue">{employee.department}</Tag>}
+          {department && <Tag type="blue">{department}</Tag>}
           {employee.org_unit && <Tag type="gray">{employee.org_unit}</Tag>}
           {employee.location && <Tag type="cool-gray">{employee.location}</Tag>}
+          {employee.employee_type && <Tag type="teal">{employee.employee_type}</Tag>}
         </div>
       )}
 
@@ -85,6 +88,7 @@ export function EmployeeProfile({ employee, manager, q }: EmployeeProfileProps) 
             <a href={`tel:${employee.mobile_phone}`}>{employee.mobile_phone}</a> · Mobile
           </DetailRow>
         )}
+        {employee.company && <DetailRow icon={<Enterprise size={16} />}>{employee.company}</DetailRow>}
         {employee.address && <DetailRow icon={<Location size={16} />}>{employee.address}</DetailRow>}
         {managerLink && (
           <DetailRow icon={<UserFollow size={16} />}>

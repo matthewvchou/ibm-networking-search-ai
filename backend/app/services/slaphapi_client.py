@@ -12,11 +12,20 @@ class SlaphapiClient:
         # TCP/TLS handshake per Bluepages call.
         self._http_client = httpx.AsyncClient(timeout=self._timeout)
 
-    async def query(self, object_class: str, filter_expr: str, attributes: str = "*") -> list[dict[str, str]]:
+    async def query(
+        self,
+        object_class: str,
+        filter_expr: str,
+        attributes: str = "*",
+        search_params: str | None = None,
+    ) -> list[dict[str, str]]:
         # SLAPHAPI's query string isn't standard key=value pairs - it's a single
-        # opaque expression: {object_class}/{filter}.list/byjson?{attributes}.
+        # opaque expression: {object_class}/{filter}.list[,{params}]/byjson?{attributes}.
         # Built manually rather than via httpx's params= to preserve that shape.
-        url = f"{self._base_url}/slaphapi?{object_class}/{filter_expr}.list/byjson?{attributes}"
+        # search_params are comma-delimited SLAPHAPI search parameters (e.g. "base"
+        # to treat object_class as a search base rather than an object class).
+        verb = ".list" + (f",{search_params}" if search_params else "")
+        url = f"{self._base_url}/slaphapi?{object_class}/{filter_expr}{verb}/byjson?{attributes}"
         try:
             response = await self._http_client.get(url)
             response.raise_for_status()
