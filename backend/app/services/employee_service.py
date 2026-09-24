@@ -8,6 +8,7 @@ from app.services.bluepages_client import BluepagesClient
 from app.services.slaphapi_client import SlaphapiClient
 
 _ORG_CHART_CONCURRENCY = 16
+_CITY_LOOKUP_CONCURRENCY = 16
 
 _MANAGER_DN_UID_RE = re.compile(r"uid=([^,]+)", re.IGNORECASE)
 
@@ -65,12 +66,18 @@ def _format_address(record: dict[str, str]) -> str | None:
     return ", ".join(parts) or None
 
 
-def _format_address_slaphapi(record: dict[str, str], building: str | None = None) -> str | None:
-    street = ", ".join(
-        p
-        for p in (f"Building {building}" if building else None, record.get("address1"), record.get("address2"))
-        if p
-    )
+def _place_from_work_location(record: dict[str, str]) -> tuple[str | None, str | None]:
+    # City and the state/province that always follows it. "st" is the full name
+    # ("North Carolina"), and is legitimately empty for countries without states.
+    return record.get("l") or None, record.get("st") or None
+
+
+def _format_address_slaphapi(record: dict[str, str]) -> str | None:
+    # Purely postal, with no building prefix: this string is only ever used as a
+    # Google Maps query and as the location link's hover title, and an internal
+    # building number degrades Google's geocoding. The building name is carried
+    # separately on Employee.building.
+    street = ", ".join(p for p in (record.get("address1"), record.get("address2")) if p)
     city_state_zip = " ".join(p for p in (record.get("l"), record.get("st"), record.get("postalcode")) if p)
     parts = [p for p in (street, city_state_zip, record.get("c")) if p]
     return ", ".join(parts) or None
@@ -84,6 +91,11 @@ class EmployeeService:
     ) -> None:
         self._client = client or BluepagesClient()
         self._slaphapi_client = slaphapi_client or SlaphapiClient()
+        # workLoc -> (city, state), for the process lifetime. Office locations are immutable
+        # reference data carrying no personal data, so memoizing them is safe, and
+        # search resolves the same handful of offices over and over. This is a
+        # deliberate, narrow exception to the "no cache in v1" rule in CLAUDE.md.
+        self._place_cache: dict[str, tuple[str | None, str | None]] = {}
 
     async def search(self, query: str, max_results: int | None = None) -> tuple[list[Employee], bool]:
         limit = max_results or settings.search_max_results
@@ -106,7 +118,10 @@ class EmployeeService:
 
         employees = [_record_to_employee(r) for r in records]
         truncated = len(employees) > limit
-        return employees[:limit], truncated
+        page = employees[:limit]
+        # Cities are attached after truncation so we only look up offices we show.
+        await self._attach_places(page, records[:limit])
+        return page, truncated
 
     async def _query_firstname_matches(self, query: str) -> list[dict[str, str]]:
         try:
@@ -152,15 +167,18 @@ class EmployeeService:
         type_code = record.get("employeetype")
         company_code = record.get("hrcompanycode")
         department_dn = record.get("department")
-        address, org_unit, employee_type, company, department_name = await asyncio.gather(
-            self._resolve_address(work_loc, building) if work_loc else _none(),
+        work_location, org_unit, employee_type, company, department_name = await asyncio.gather(
+            self._lookup("ibmworklocation", f"workLoc={work_loc}") if work_loc else _none(),
             self._resolve_org_unit(org_code) if org_code else _none(),
             self._resolve_employee_type(type_code) if type_code else _none(),
             self._resolve_company(company_code) if company_code else _none(),
             self._resolve_department_name(department_dn) if department_dn else _none(),
         )
 
-        employee.address = address
+        if work_location:
+            employee.city, employee.state = _place_from_work_location(work_location)
+            employee.address = _format_address_slaphapi(work_location)
+        employee.building = building or None
         employee.org_unit = org_unit
         # employeetype may not be a code at all - fall back to the raw value.
         employee.employee_type = employee_type or type_code or None
@@ -185,11 +203,36 @@ class EmployeeService:
             return None
         return records[0] if records else None
 
-    async def _resolve_address(self, work_loc: str, building: str | None = None) -> str | None:
+    async def _resolve_place(self, work_loc: str) -> tuple[str | None, str | None]:
+        # (city, state). Cached because search resolves the same handful of offices
+        # over and over; see the cache note in __init__.
+        if work_loc in self._place_cache:
+            return self._place_cache[work_loc]
         record = await self._lookup("ibmworklocation", f"workLoc={work_loc}")
-        if record is None:
-            return None
-        return _format_address_slaphapi(record, building)
+        place = _place_from_work_location(record) if record else (None, None)
+        if place[0]:
+            # Successes only. Caching a miss from a transient directory outage
+            # would poison every later search that touches this office.
+            self._place_cache[work_loc] = place
+        return place
+
+    async def _attach_places(self, employees: list[Employee], records: list[dict[str, str]]) -> None:
+        # WSAPI person records carry the office code but no city or state, so both
+        # have to come from the ibmworklocation table. Resolved once per distinct
+        # office rather than once per person - a full result page usually spans far
+        # fewer offices - so this is one extra round-trip of depth, not one call per row.
+        codes = sorted({wl for r in records if (wl := r.get("WORKLOC"))})
+        if not codes:
+            return
+        semaphore = asyncio.Semaphore(_CITY_LOOKUP_CONCURRENCY)
+
+        async def resolve(code: str) -> tuple[str | None, str | None]:
+            async with semaphore:
+                return await self._resolve_place(code)
+
+        places = dict(zip(codes, await asyncio.gather(*(resolve(c) for c in codes))))
+        for employee, record in zip(employees, records):
+            employee.city, employee.state = places.get(record.get("WORKLOC") or "", (None, None))
 
     async def _resolve_org_unit(self, org_code: str) -> str | None:
         record = await self._lookup("ibmorganization", f"hrOrganizationCode={org_code}")

@@ -11,6 +11,9 @@ export interface Employee {
   mobile_phone: string | null
   address: string | null
   org_unit: string | null
+  city: string | null
+  state: string | null
+  building: string | null
   // Only populated by the enriched single-employee endpoint; `department` is the raw code.
   employee_type: string | null
   company: string | null

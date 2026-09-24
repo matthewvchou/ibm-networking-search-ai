@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ClickableTile, InlineNotification, PaginationNav, SkeletonText } from '@carbon/react'
+import { ClickableTile, InlineNotification, PaginationNav, SkeletonText, Tag } from '@carbon/react'
 import { useNavigate } from 'react-router'
 import type { Employee } from '../api/client'
 import { formatDisplayName } from '../utils/formatName'
@@ -75,8 +75,13 @@ export function EmployeeSearchResults({ query, loading, error, results, truncate
           >
             <div style={{ fontWeight: 600 }}>{formatDisplayName(employee.display_name)}</div>
             <div style={{ fontSize: 14 }}>
-              {[employee.title, employee.department, employee.location].filter(Boolean).join(' · ') || 'No details available'}
+              {[employee.title, employee.department].filter(Boolean).join(' · ') || 'No details available'}
             </div>
+            {(employee.city || employee.location) && (
+              <Tag type="cool-gray" style={{ marginTop: 4, marginLeft: 0 }}>
+                {[employee.city, employee.state, employee.location].filter(Boolean).join(', ')}
+              </Tag>
+            )}
           </ClickableTile>
         ))}
       </div>
