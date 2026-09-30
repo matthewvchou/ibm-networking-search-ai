@@ -3,7 +3,6 @@ import { Button, Tag, Tile } from '@carbon/react'
 import { Email, Enterprise, Launch, Location, Mobile, Phone, UserFollow } from '@carbon/icons-react'
 import { Link as RouterLink } from 'react-router'
 import type { Employee } from '../api/client'
-import { formatDisplayName } from '../utils/formatName'
 
 interface EmployeeProfileProps {
   employee: Employee
@@ -52,7 +51,7 @@ export function EmployeeProfile({ employee, manager, q }: EmployeeProfileProps) 
 
   const managerLink = manager && (
     <RouterLink to={`/employee/${manager.id}${q ? `?q=${encodeURIComponent(q)}` : ''}`}>
-      {formatDisplayName(manager.display_name)}
+      {manager.display_name}
     </RouterLink>
   )
 
@@ -61,7 +60,7 @@ export function EmployeeProfile({ employee, manager, q }: EmployeeProfileProps) 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16 }}>
         <div>
           <h2 style={{ margin: 0, fontSize: '2rem', fontWeight: 600, lineHeight: 1.25, color: 'var(--text-h)' }}>
-            {formatDisplayName(employee.display_name)}
+            {employee.display_name}
           </h2>
 
           {employee.title && (

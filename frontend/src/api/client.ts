@@ -1,6 +1,9 @@
 export interface Employee {
   id: string
+  // Always "First Last". `last_name` carries the surname on its own, for sorting -
+  // it can't be recovered from display_name (multi-word surnames exist).
   display_name: string
+  last_name: string
   email: string | null
   title: string | null
   department: string | null

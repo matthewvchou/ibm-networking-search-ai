@@ -2,7 +2,6 @@ import { useState } from 'react'
 import { ClickableTile, InlineNotification, PaginationNav, SkeletonText, Tag } from '@carbon/react'
 import { useNavigate } from 'react-router'
 import type { Employee } from '../api/client'
-import { formatDisplayName } from '../utils/formatName'
 
 const PAGE_SIZE = 10
 
@@ -24,7 +23,10 @@ export function EmployeeSearchResults({ query, loading, error, results, truncate
     setPage(0)
   }
 
-  const sortedResults = [...results].sort((a, b) => a.display_name.localeCompare(b.display_name))
+  // Surname first, then the full name, so rows read alphabetically by last name.
+  const sortedResults = [...results].sort(
+    (a, b) => a.last_name.localeCompare(b.last_name) || a.display_name.localeCompare(b.display_name),
+  )
   const pageCount = Math.ceil(sortedResults.length / PAGE_SIZE)
   const pageResults = sortedResults.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE)
 
@@ -73,7 +75,7 @@ export function EmployeeSearchResults({ query, loading, error, results, truncate
               navigate(`/employee/${employee.id}${query ? `?q=${encodeURIComponent(query)}` : ''}`)
             }
           >
-            <div style={{ fontWeight: 600 }}>{formatDisplayName(employee.display_name)}</div>
+            <div style={{ fontWeight: 600 }}>{employee.display_name}</div>
             <div style={{ fontSize: 14 }}>
               {[employee.title, employee.department].filter(Boolean).join(' · ') || 'No details available'}
             </div>

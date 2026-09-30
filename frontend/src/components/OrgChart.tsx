@@ -3,11 +3,10 @@ import Tree from 'react-d3-tree'
 import type { CustomNodeElementProps, RawNodeDatum } from 'react-d3-tree'
 import { Tile } from '@carbon/react'
 import type { Employee, OrgNode } from '../api/client'
-import { formatDisplayName } from '../utils/formatName'
 
 function orgNodeToRaw(node: OrgNode): RawNodeDatum {
   return {
-    name: formatDisplayName(node.employee.display_name),
+    name: node.employee.display_name,
     attributes: {
       id: node.employee.id,
       hasMore: node.has_more_reports,
@@ -21,7 +20,7 @@ function buildTreeData(managerChain: Employee[], orgNode: OrgNode): RawNodeDatum
   const rootDescendant = orgNodeToRaw(orgNode)
   return ancestors.reduceRight<RawNodeDatum>(
     (child, ancestor) => ({
-      name: formatDisplayName(ancestor.display_name),
+      name: ancestor.display_name,
       attributes: { id: ancestor.id, hasMore: false },
       children: [child],
     }),

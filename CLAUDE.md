@@ -19,7 +19,7 @@ uvicorn app.main:app --reload --port 8000
 ```
 Interactive API docs at `http://localhost:8000/docs` once running — the fastest way to manually exercise an endpoint.
 
-Test tooling (`pytest`, `pytest-asyncio`, `respx`) is in `requirements.txt`, but **no test files exist yet**. When adding tests, run with `pytest` from `backend/`.
+Test tooling (`pytest`, `pytest-asyncio`, `respx`) is in `requirements.txt`. `backend/tests/test_employee_service.py` covers name and search-filter construction as pure functions — no HTTP mocking involved yet. Run with `pytest` from `backend/`; the empty `backend/conftest.py` is what puts `app/` on `sys.path` for a bare `pytest` invocation, so don't delete it.
 
 Note: on Windows, `uvicorn --reload` has been flaky when many files change at once (reload fires but doesn't actually swap in the new app, so stale routes 404). If endpoints seem to not reflect recent code changes, stop the process and restart uvicorn without `--reload` to confirm, rather than assuming the code is wrong.
 
@@ -38,7 +38,7 @@ The Vite dev server proxies `/api/*` to `http://localhost:8000` (see `vite.confi
 
 ### Backend: Bluepages HTTP client, not LDAP
 
-Despite "LDAP" being the original assumption, IBM's Bluepages directory is exposed as a **plain-text HTTP GET API**, not raw LDAP — there's no `ldap3`/bind/filter-escaping anywhere in this codebase. All directory access goes through `app/services/bluepages_client.py`, which calls `GET {base_url}/wsapi?{method}={value}` and parses the plain-text response.
+Despite "LDAP" being the original assumption, IBM's Bluepages directory is exposed as a **plain-text HTTP GET API**, not raw LDAP — there's no `ldap3` and no bind anywhere in this codebase. WSAPI access goes through `app/services/bluepages_client.py`, which calls `GET {base_url}/wsapi?{method}={value}` and parses the plain-text response. The second API, SLAPHAPI (`app/services/slaphapi_client.py`), is JSON over HTTP GET but does take a real **LDAP filter expression** in the URL, so filter escaping matters there — see the search section below.
 
 Wire format specifics (load-bearing — get these wrong and parsing silently breaks):
 - Records are `KEY: value` lines with **no blank-line separator** between records.
@@ -46,14 +46,23 @@ Wire format specifics (load-bearing — get these wrong and parsing silently bre
 - A trailer line follows the records with no blank line before it: `# rc=0, count=N, message=Success` (or e.g. `# rc=904, message=Invalid request specified` for a malformed request). `rc != 0` is treated as a directory error, not a legitimately-empty result.
 
 Bluepages methods used (passed as the `method` argument to `BluepagesClient.query`):
-- `allByNameFuzzy` — name search
 - `byCnum` — get one record by ID (**not** `bySerial`, which uses a different, incompatible ID scheme)
 - `directReportsOf` — direct reports of a manager ID
 - `managerChainFor` — chain of managers **above** a given ID; it excludes the employee itself and starts at their direct manager, so `EmployeeService.get_manager_chain` prepends the employee to match the documented "self → ... → top" contract.
 
-Field/ID scheme: `CNUM` (unique employee ID, e.g. `005469897`) is `EMPNUM`+`EMPCC`. `MNUM` (manager reference, e.g. `6D9496897`) is `MGRNUM`+`MGRCC` — a plain ID string directly usable as input to `directReportsOf`/`managerChainFor`, not a DN. Other fields: `NAME` ("Last, First"), `DEPT`, `JOBRESPONSIB` (title), `INTERNET` (email), `COUNTRY`/`WORKLOC` (location), `MGR` (Y/N).
+Field/ID scheme: `CNUM` (unique employee ID, e.g. `005469897`) is `EMPNUM`+`EMPCC`. `MNUM` (manager reference, e.g. `6D9496897`) is `MGRNUM`+`MGRCC` — a plain ID string directly usable as input to `directReportsOf`/`managerChainFor`, not a DN. Other fields: `NAME` ("Last, First" — see the name-normalization note below), `DEPT`, `JOBRESPONSIB` (title), `INTERNET` (email), `COUNTRY`/`WORKLOC` (location), `MGR` (Y/N).
 
 Work location is displayed as **one** thing, not two. `Employee.location` is the friendly *country* name (`co`/`COUNTRY`) despite the name; `city`, `state` and `address` all come from a single `ibmworklocation` lookup (`_place_from_work_location` extracts `l`/`st`; `st` is the full name, "North Carolina", and is legitimately empty for countries without states), and `building` comes free off the `ibmperson` record. `_format_address_slaphapi` deliberately builds a **purely postal** address with no `Building NNN` prefix, because that string's only jobs are to be a Google Maps query and a hover title, and an internal building number degrades Google's geocoding — the building name is shown via `Employee.building` instead. **The city is always followed by the state.** The profile card renders `City, State` as a Maps hyperlink (`EmployeeProfile.tsx`) and search rows render `City, State, Country` as a single `Tag`. Both join on `.filter(Boolean)` so a missing state leaves no empty segment, both fall back to the country alone when there is no city, and the profile falls back to plain text when there is no address to point Maps at.
+
+Name search runs on **SLAPHAPI**, not WSAPI `allByNameFuzzy`. `_search_filter` builds one filter of the form `(&(hractive=A)(|(sn=q*)(givenname=q*)))`, so surname and first name are equally first-class — the old WSAPI path matched surnames only for a bare word ("Laura" found people *surnamed* Laura) and reached first names solely through a `"query %"` wildcard quirk. A multi-token query tries both orders, so "Laura Smith" and "Smith, Laura" resolve to the same person; the token pair is sorted only to keep the filter string canonical.
+
+Two hard-won constraints live in that filter, and removing either one hurts:
+- **A one- or two-character query matches exactly, not by prefix.** SLAPHAPI enforces no server-side size limit, and short prefixes are ruinous: `(sn=a*)` measured **108MB** before timing out and `(sn=ma*)` ~66MB, while three characters lands at 2–12MB. Truncation to `limit` is therefore client-side and happens *after* the whole payload is parsed. Search gets its own longer `slaphapi_search_timeout_seconds` (10s) because a legitimately broad 3-char prefix can take most of 5s.
+- **Values are escaped (RFC 4515) before interpolation** — `_LDAP_FILTER_ESCAPES`. Search is the only place a user-supplied string reaches a filter expression; the WSAPI client never needed this.
+
+Also load-bearing for SLAPHAPI queries generally: **the attribute list must be `*` or a single attribute name.** `byjson?cn` works, but `byjson?cn,sn` answers with an empty `attribute` array and `code: 0` — a silent empty parse, not an error — so projecting a handful of fields to shrink a response is not an option.
+
+Names are normalized in the backend, and `display_name` is **"First Last" on every endpoint**. The frontend renders it verbatim; there is deliberately no display-time reformatting. `_wsapi_name` splits WSAPI `NAME` ("Last, First" — reliably one comma, surname first) and `_slaphapi_name` composes `preferredfirstname`/`givenname` + `preferredlastname`/`sn`. **Never derive a name from `cn`, and never reorder a name on a comma** — that was a real bug: `cn` is usually "First Last", but ~1–2% of live records carry a stray comma in first-then-last order (`cn="Jinkwang, Kim"` where `sn=Kim`), which is indistinguishable from the "Last, First" format, so a comma-triggered swap rendered exactly those records surname-first. `preferred*` wins over `sn`/`givenname` because `givenname` is sometimes multi-valued (`["Huan", "Huan B"]`) where `preferred*` is not, and `SlaphapiClient` keeps `value[0]` arbitrarily. `Employee.last_name` carries the surname separately because it cannot be recovered from the display name (real records have multi-word surnames, e.g. `sn="Nguyen Duc"`) and the search results table sorts on it.
 
 `app/services/employee_service.py` is the only place that maps raw Bluepages field dicts to the `Employee` Pydantic model (`app/models/employee.py`) — routers never touch raw Bluepages records directly.
 
@@ -69,7 +78,7 @@ Caching is deliberately absent in v1 with **one exception**: `EmployeeService._p
 
 ### Frontend: intentionally minimal test harness, plus one real component
 
-`frontend/src/App.tsx` is still a **single-page manual test UI** — no router, no React Query. It's not meant to represent the eventual product structure; it exists to exercise the backend endpoints by clicking around: search, select an employee, and view their org chart. `frontend/src/api/client.ts` is a thin typed `fetch` wrapper, one function per backend endpoint, and is the only place that knows the backend's JSON response shapes.
+`frontend/src/App.tsx` is a thin **router** (`react-router`, no React Query): `/` renders `AppLayout` (header + `<Outlet/>`), with `SearchPage` at the index and `EmployeeDetailPage` at `/employee/:id`. The search query lives in the URL (`?q=`), and clicking a search row or an org-chart node navigates by id — the detail page always re-fetches rather than carrying an employee object over from the list payload. It's still a thin harness rather than the eventual product structure. `frontend/src/api/client.ts` is a thin typed `fetch` wrapper, one function per backend endpoint, and is the only place that knows the backend's JSON response shapes.
 
 `frontend/src/components/OrgChart.tsx` is the one piece of real, dedicated UI in the frontend so far. It renders a single `react-d3-tree` tree combining the ancestor chain (from `getManagerChain`) and the descendant subtree (from `getOrgChart`) into one `RawNodeDatum` tree — there's no in-place expand/collapse state; clicking any node (ancestor or descendant) just calls `onSelect(id)`, which re-runs `App.tsx`'s `selectEmployee` and re-centers the whole view on that person. Nodes at the `has_more_reports` boundary get a dashed accent border as a "click to load more" affordance. If you need to tune layout, `nodeSize`/`separation`/the container's fixed height are the levers — increasing tree depth or org width without adjusting these will clip labels against the container's bottom edge.
 

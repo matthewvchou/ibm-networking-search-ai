@@ -5,7 +5,11 @@ from pydantic import BaseModel
 
 class Employee(BaseModel):
     id: str
+    # "First Last" on every endpoint. The surname is carried separately because it
+    # can't be recovered from the display name - real records have multi-word
+    # surnames ("Nguyen Duc") - and the UI sorts search results by it.
     display_name: str
+    last_name: str = ""
     email: str | None = None
     title: str | None = None
     department: str | None = None

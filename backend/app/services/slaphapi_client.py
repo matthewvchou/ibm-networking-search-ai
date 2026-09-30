@@ -18,16 +18,23 @@ class SlaphapiClient:
         filter_expr: str,
         attributes: str = "*",
         search_params: str | None = None,
+        timeout: float | None = None,
     ) -> list[dict[str, str]]:
         # SLAPHAPI's query string isn't standard key=value pairs - it's a single
         # opaque expression: {object_class}/{filter}.list[,{params}]/byjson?{attributes}.
         # Built manually rather than via httpx's params= to preserve that shape.
         # search_params are comma-delimited SLAPHAPI search parameters (e.g. "base"
         # to treat object_class as a search base rather than an object class).
+        # `attributes` is one attribute name or "*" - a comma-separated list is
+        # accepted and then silently answered with an empty attribute array, so
+        # projecting a handful of fields is not an option here.
         verb = ".list" + (f",{search_params}" if search_params else "")
         url = f"{self._base_url}/slaphapi?{object_class}/{filter_expr}{verb}/byjson?{attributes}"
+        # Per-request timeout override on the shared client, for queries whose
+        # payload can legitimately run to megabytes (see the search filter).
+        request_kwargs = {} if timeout is None else {"timeout": timeout}
         try:
-            response = await self._http_client.get(url)
+            response = await self._http_client.get(url, **request_kwargs)
             response.raise_for_status()
             payload = response.json()
         except (httpx.HTTPError, ValueError) as exc:

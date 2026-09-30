@@ -12,16 +12,73 @@ _CITY_LOOKUP_CONCURRENCY = 16
 
 _MANAGER_DN_UID_RE = re.compile(r"uid=([^,]+)", re.IGNORECASE)
 
+# Below this, a one-token query matches exactly instead of by prefix. SLAPHAPI
+# enforces no server-side size limit, and a one- or two-character prefix is
+# ruinous: (sn=a*) streamed 108MB before timing out, (sn=ma*) ~66MB, while
+# three characters lands at 2-12MB.
+_SEARCH_PREFIX_MIN_LENGTH = 3
+
+# RFC 4515 escaping for values interpolated into a search filter. Search is the
+# only place a user-supplied string reaches one.
+_LDAP_FILTER_ESCAPES = str.maketrans(
+    {"\\": r"\5c", "(": r"\28", ")": r"\29", "*": r"\2a", "\0": r"\00"}
+)
+
 # ibmperson.department is documented only as "DN of department entry" - the ED
 # schema pages we have don't cover that entry's object class, so the readable
 # name could live under any of these. First populated one wins.
 _DEPT_NAME_ATTRS = ("description", "hrorganizationdisplay", "hrorganizationname", "ou", "cn")
 
 
+def _name_part(value: str | None) -> str:
+    # Commas are stripped rather than kept: dirty records put one *inside* a single
+    # part (givenname="HANNAH, FONG LIN", sn="LEE"), and a comma in a name is only
+    # ever read as the "Last, First" directory format.
+    return " ".join(value.replace(",", " ").split()) if value else ""
+
+
+def _wsapi_name(record: dict[str, str]) -> tuple[str, str]:
+    # (display_name, last_name). WSAPI NAME is "Last, First" and dependably so -
+    # every live record sampled had exactly one comma with the surname first.
+    # HRFIRSTNAME/HRLASTNAME look like the cleaner source but are empty on ~22% of
+    # records, so splitting NAME is the reliable route.
+    name = record.get("NAME", "").strip()
+    surname, comma, given = name.partition(",")
+    surname, given = surname.strip(), _name_part(given)
+    if not comma or not surname or not given:
+        # Nothing to split on, so the word order is unknown - pass it through
+        # rather than guess at it.
+        return name, ""
+    return f"{given} {surname}", surname
+
+
+def _slaphapi_name(record: dict[str, str]) -> tuple[str, str]:
+    # (display_name, last_name), built from the structured name attributes instead
+    # of `cn`. `cn` cannot carry word order: it is usually "First Last", but ~1-2%
+    # of live records hold a stray comma in first-then-last order (cn="Jinkwang,
+    # Kim" where sn=Kim, givenname=Jinkwang), which is indistinguishable from the
+    # "Last, First" format - so anything that reorders on the comma renders those
+    # records backwards. preferred* wins over sn/givenname: both pairs are
+    # near-universally populated, but givenname is sometimes multi-valued
+    # (["Huan", "Huan B"]) where preferred* is not, and SlaphapiClient keeps
+    # value[0] arbitrarily.
+    surname = _name_part(record.get("preferredlastname") or record.get("sn"))
+    given = _name_part(record.get("preferredfirstname") or record.get("givenname"))
+    if surname and given:
+        return f"{given} {surname}", surname
+    if surname or given:
+        return surname or given, surname
+    # Functional IDs and partial records (cn="HELPDESK", no sn/givenname). Never
+    # reordered, only cleaned.
+    return _name_part(record.get("cn")), ""
+
+
 def _record_to_employee(record: dict[str, str]) -> Employee:
+    display_name, last_name = _wsapi_name(record)
     return Employee(
         id=record.get("CNUM", ""),
-        display_name=record.get("NAME", ""),
+        display_name=display_name,
+        last_name=last_name,
         email=record.get("INTERNET") or None,
         title=record.get("JOBRESPONSIB") or None,
         department=record.get("DEPT") or None,
@@ -42,9 +99,11 @@ def _manager_id_from_slaphapi(record: dict[str, str]) -> str | None:
 
 
 def _slaphapi_record_to_employee(record: dict[str, str]) -> Employee:
+    display_name, last_name = _slaphapi_name(record)
     return Employee(
         id=record.get("uid", ""),
-        display_name=record.get("cn", ""),
+        display_name=display_name,
+        last_name=last_name,
         email=record.get("mail") or None,
         title=record.get("jobresponsibilities") or None,
         department=record.get("dept") or None,
@@ -53,6 +112,34 @@ def _slaphapi_record_to_employee(record: dict[str, str]) -> Employee:
         office_phone=record.get("telephonenumber") or None,
         mobile_phone=record.get("mobile") or None,
     )
+
+
+def _search_filter(query: str) -> str | None:
+    # Commas are separators here, not part of a name, so "Smith, Laura" and
+    # "Laura Smith" reduce to the same two tokens. None means "nothing to search".
+    tokens = [t.translate(_LDAP_FILTER_ESCAPES) for t in query.replace(",", " ").split()]
+    if not tokens:
+        return None
+    if len(tokens) == 1:
+        token = tokens[0]
+        pattern = f"{token}*" if len(token) >= _SEARCH_PREFIX_MIN_LENGTH else token
+        # sn and givenname are both first-class: the old WSAPI allByNameFuzzy
+        # matched surnames only for a bare word, and reached first names solely
+        # through a wildcard quirk.
+        name_filter = f"(|(sn={pattern})(givenname={pattern}))"
+    else:
+        # Both orders, since the query may be given either way. Middle names are
+        # ignored rather than guessed at. The pair is sorted only to keep the filter
+        # canonical - it already matches either order, so "Ada Lovelace" and
+        # "Lovelace, Ada" should produce one identical filter, not two.
+        a, b = sorted((tokens[0], tokens[-1]))
+        name_filter = (
+            f"(|(&(givenname={a}*)(sn={b}*))"
+            f"(&(givenname={b}*)(sn={a}*)))"
+        )
+    # hractive=A keeps results to current employees, and trims the payload of a
+    # broad query by ~20% on the way.
+    return f"(&(hractive=A){name_filter})"
 
 
 async def _none() -> None:
@@ -100,53 +187,25 @@ class EmployeeService:
     async def search(self, query: str, max_results: int | None = None) -> tuple[list[Employee], bool]:
         limit = max_results or settings.search_max_results
 
-        # allByNameFuzzy only matches last name for a single bare word ("Laura" finds
-        # people surnamed Laura, not people named Laura). A second word paired with a
-        # literal "%" leaks through to an LDAP substring filter that matches first name
-        # instead, so a single-token query is unioned with that first-name lookup too,
-        # run concurrently with its own shorter timeout. Multi-token queries
-        # ("Last, First" / "First Last") already cross-match both fields, so they skip
-        # this and just do the one call.
-        if len(query.split()) == 1:
-            last_name_records, first_name_records = await asyncio.gather(
-                self._client.query("allByNameFuzzy", query),
-                self._query_firstname_matches(query),
-            )
-            records = self._merge_records(last_name_records, first_name_records, limit)
-        else:
-            records = await self._client.query("allByNameFuzzy", query)
+        # One SLAPHAPI query against sn/givenname, which is also the profile
+        # endpoint's source - so a person's name is built the same way whichever
+        # screen it lands on. SLAPHAPI applies no size limit of its own, hence the
+        # client-side truncation below and the prefix guard in _search_filter.
+        search_filter = _search_filter(query)
+        if search_filter is None:
+            return [], False
+        records = await self._slaphapi_client.query(
+            "ibmperson",
+            search_filter,
+            timeout=settings.slaphapi_search_timeout_seconds,
+        )
 
-        employees = [_record_to_employee(r) for r in records]
+        employees = [_slaphapi_record_to_employee(r) for r in records]
         truncated = len(employees) > limit
         page = employees[:limit]
         # Cities are attached after truncation so we only look up offices we show.
         await self._attach_places(page, records[:limit])
         return page, truncated
-
-    async def _query_firstname_matches(self, query: str) -> list[dict[str, str]]:
-        try:
-            return await self._client.query(
-                "allByNameFuzzy",
-                f"{query} %",
-                timeout=settings.bluepages_firstname_timeout_seconds,
-            )
-        except BluepagesUnavailableException:
-            # Slow/huge/erroring wildcard match — silently fall back to just the
-            # last-name results rather than failing or delaying the whole search.
-            return []
-
-    @staticmethod
-    def _merge_records(
-        base_records: list[dict[str, str]], extra_records: list[dict[str, str]], limit: int
-    ) -> list[dict[str, str]]:
-        seen_ids = {r.get("CNUM") for r in base_records}
-        merged = list(base_records)
-        for record in extra_records[:limit]:
-            cnum = record.get("CNUM")
-            if cnum and cnum not in seen_ids:
-                seen_ids.add(cnum)
-                merged.append(record)
-        return merged
 
     async def get_by_id(self, employee_id: str) -> Employee | None:
         records = await self._client.query("byCnum", employee_id)
@@ -217,11 +276,11 @@ class EmployeeService:
         return place
 
     async def _attach_places(self, employees: list[Employee], records: list[dict[str, str]]) -> None:
-        # WSAPI person records carry the office code but no city or state, so both
-        # have to come from the ibmworklocation table. Resolved once per distinct
-        # office rather than once per person - a full result page usually spans far
-        # fewer offices - so this is one extra round-trip of depth, not one call per row.
-        codes = sorted({wl for r in records if (wl := r.get("WORKLOC"))})
+        # Person records carry the office code but no city or state, so both have to
+        # come from the ibmworklocation table. Resolved once per distinct office
+        # rather than once per person - a full result page usually spans far fewer
+        # offices - so this is one extra round-trip of depth, not one call per row.
+        codes = sorted({wl for r in records if (wl := r.get("workloc"))})
         if not codes:
             return
         semaphore = asyncio.Semaphore(_CITY_LOOKUP_CONCURRENCY)
@@ -232,7 +291,7 @@ class EmployeeService:
 
         places = dict(zip(codes, await asyncio.gather(*(resolve(c) for c in codes))))
         for employee, record in zip(employees, records):
-            employee.city, employee.state = places.get(record.get("WORKLOC") or "", (None, None))
+            employee.city, employee.state = places.get(record.get("workloc") or "", (None, None))
 
     async def _resolve_org_unit(self, org_code: str) -> str | None:
         record = await self._lookup("ibmorganization", f"hrOrganizationCode={org_code}")
