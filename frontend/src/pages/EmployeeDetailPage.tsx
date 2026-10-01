@@ -11,7 +11,9 @@ export function EmployeeDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
-  const q = searchParams.get('q')
+  // The whole search string is carried through, not just ?q=, so a job-title filter
+  // survives a trip into a profile and back.
+  const backTo = searchParams.toString()
 
   const [employee, setEmployee] = useState<Employee | null>(null)
   const [managerChain, setManagerChain] = useState<Employee[]>([])
@@ -66,7 +68,7 @@ export function EmployeeDetailPage() {
         )}
         {error && <InlineNotification kind="error" title="Couldn't load employee" subtitle={error} hideCloseButton />}
 
-        {employee && <EmployeeProfile employee={employee} manager={managerChain[1] ?? null} q={q} />}
+        {employee && <EmployeeProfile employee={employee} manager={managerChain[1] ?? null} backTo={backTo} />}
       </div>
 
       {orgChart && employee && (
@@ -76,7 +78,7 @@ export function EmployeeDetailPage() {
             orgNode={orgChart}
             selectedId={employee.id}
             onSelect={(selectedId) =>
-              navigate(`/employee/${selectedId}${q ? `?q=${encodeURIComponent(q)}` : ''}`)
+              navigate(`/employee/${selectedId}${backTo ? `?${backTo}` : ''}`)
             }
           />
         </div>

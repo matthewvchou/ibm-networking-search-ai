@@ -4,11 +4,17 @@ All names here are invented - the directory these helpers read from returns real
 employee data, which must not land in a fixture.
 """
 
+from urllib.parse import quote
+
 from app.services.employee_service import (
+    TITLE_SUBSTRING_MIN_LENGTH,
+    _compose_filter,
     _search_filter,
     _slaphapi_name,
+    _title_predicate,
     _wsapi_name,
 )
+from app.services.slaphapi_client import _SAFE_FILTER_CHARS
 
 
 def test_slaphapi_name_uses_structured_fields():
@@ -96,3 +102,89 @@ def test_search_filter_escapes_filter_metacharacters():
 
 def test_search_filter_of_a_blank_query_is_none():
     assert _search_filter("   ") is None
+
+
+def test_title_predicate_matches_a_single_token_as_a_substring():
+    # Leading wildcard is deliberate: a job title is a phrase and the interesting
+    # word is rarely at the start ("Senior Site Reliability Engineer").
+    assert _title_predicate("architect") == "(jobresponsibilities=*architect*)"
+
+
+def test_title_predicate_ands_one_assertion_per_token():
+    # Not a single "*senior architect*" assertion: the tokens may be separated by
+    # other words and given in either order. Measured on live data, this form matched
+    # 133 records where the single-phrase form matched 18.
+    assert _title_predicate("senior architect") == (
+        "(&(jobresponsibilities=*senior*)(jobresponsibilities=*architect*))"
+    )
+
+
+def test_title_predicate_preserves_token_order():
+    # Unlike the name predicate, token order is not normalized - an AND already
+    # matches either order, so sorting would only obscure the user's input.
+    assert _title_predicate("architect senior") == (
+        "(&(jobresponsibilities=*architect*)(jobresponsibilities=*senior*))"
+    )
+
+
+def test_title_predicate_escapes_filter_metacharacters():
+    assert _title_predicate("a*(b)") == r"(jobresponsibilities=*a\2a\28b\29*)"
+
+
+def test_title_predicate_of_a_blank_title_is_none():
+    assert _title_predicate("   ") is None
+
+
+def test_compose_filter_combines_name_and_title():
+    # Predicate order is part of the contract: hractive, then name, then title.
+    assert _compose_filter(query="laura", title="architect") == (
+        "(&(hractive=A)(|(sn=laura*)(givenname=laura*))(jobresponsibilities=*architect*))"
+    )
+
+
+def test_compose_filter_of_a_title_alone_omits_the_name_predicate():
+    assert _compose_filter(title="architect") == (
+        "(&(hractive=A)(jobresponsibilities=*architect*))"
+    )
+
+
+def test_compose_filter_with_no_criteria_is_none():
+    # Never a bare (hractive=A): that is the whole active directory, which measured
+    # 154MB+ without completing.
+    assert _compose_filter() is None
+    assert _compose_filter(query="  ", title="  ") is None
+
+
+def test_search_filter_is_a_name_only_shim_over_compose_filter():
+    assert _search_filter("laura") == _compose_filter(query="laura")
+
+
+def test_title_minimum_length_admits_real_two_character_titles():
+    # The router rejects below this; the predicate itself stays dumb. Only the
+    # one-character case is ruinous (*a* measured 29s), while two characters are cheap
+    # and are real titles - "C#", "VP", "UX", "AI". A higher floor would reject those
+    # for no benefit. See the constant's comment.
+    assert TITLE_SUBSTRING_MIN_LENGTH == 2
+
+
+def test_filter_quoting_escapes_characters_that_break_a_url():
+    # "+" would be decoded back to a space server-side (a search for "C++" answered
+    # 14 where the correct answer is 16), and "#" would truncate the URL as a
+    # fragment so SLAPHAPI never sees the trailing /byjson.
+    quoted = quote(_title_predicate("C++"), safe=_SAFE_FILTER_CHARS)
+    assert quoted == "(jobresponsibilities=*C%2B%2B*)"
+    assert quote(_title_predicate("C#"), safe=_SAFE_FILTER_CHARS) == (
+        "(jobresponsibilities=*C%23*)"
+    )
+    assert quote(_title_predicate("R&D"), safe=_SAFE_FILTER_CHARS) == (
+        "(jobresponsibilities=*R&D*)"
+    )
+
+
+def test_filter_quoting_preserves_the_filter_grammar():
+    # The structural characters must survive, or the filter stops being a filter.
+    composed = _compose_filter(query="ada lovelace", title="project manager")
+    quoted = quote(composed, safe=_SAFE_FILTER_CHARS)
+    assert quoted == composed.replace(" ", "%20")
+    for char in "()&|=*":
+        assert char in quoted

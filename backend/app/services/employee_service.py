@@ -18,6 +18,21 @@ _MANAGER_DN_UID_RE = re.compile(r"uid=([^,]+)", re.IGNORECASE)
 # three characters lands at 2-12MB.
 _SEARCH_PREFIX_MIN_LENGTH = 3
 
+# Job-title tokens are matched as *substrings*. Only the one-character case is
+# actually ruinous, so the floor is 2 rather than the 3 used for name prefixes above:
+# measured per-token, (jobresponsibilities=*a*) took 29s and *e* 29.6s - already over
+# the 10s search budget, and those were measured with a projected attribute list, so
+# the real request is far worse. Two characters are cheap (*vp* 0.8s/81 hits, *ux*
+# 0.8s, *ai* 1.5s), and short real titles exist - "C#", "VP", "UX", "AI", "C++" -
+# so a higher floor would reject legitimate searches for no benefit.
+#
+# Note this bounds nothing beyond that: a substring does not narrow as it lengthens
+# the way a prefix does, and (jobresponsibilities=*Manager*) is 7 characters and
+# still measured 16.9MB/6.7s. The real fix is projecting the attribute list - see
+# CLAUDE.md - and until then a broad title can still time out, which is why that
+# surfaces as a 504 rather than a 503.
+TITLE_SUBSTRING_MIN_LENGTH = 2
+
 # RFC 4515 escaping for values interpolated into a search filter. Search is the
 # only place a user-supplied string reaches one.
 _LDAP_FILTER_ESCAPES = str.maketrans(
@@ -114,9 +129,9 @@ def _slaphapi_record_to_employee(record: dict[str, str]) -> Employee:
     )
 
 
-def _search_filter(query: str) -> str | None:
+def _name_predicate(query: str) -> str | None:
     # Commas are separators here, not part of a name, so "Smith, Laura" and
-    # "Laura Smith" reduce to the same two tokens. None means "nothing to search".
+    # "Laura Smith" reduce to the same two tokens. None means "no name to match on".
     tokens = [t.translate(_LDAP_FILTER_ESCAPES) for t in query.replace(",", " ").split()]
     if not tokens:
         return None
@@ -126,20 +141,50 @@ def _search_filter(query: str) -> str | None:
         # sn and givenname are both first-class: the old WSAPI allByNameFuzzy
         # matched surnames only for a bare word, and reached first names solely
         # through a wildcard quirk.
-        name_filter = f"(|(sn={pattern})(givenname={pattern}))"
-    else:
-        # Both orders, since the query may be given either way. Middle names are
-        # ignored rather than guessed at. The pair is sorted only to keep the filter
-        # canonical - it already matches either order, so "Ada Lovelace" and
-        # "Lovelace, Ada" should produce one identical filter, not two.
-        a, b = sorted((tokens[0], tokens[-1]))
-        name_filter = (
-            f"(|(&(givenname={a}*)(sn={b}*))"
-            f"(&(givenname={b}*)(sn={a}*)))"
-        )
+        return f"(|(sn={pattern})(givenname={pattern}))"
+    # Both orders, since the query may be given either way. Middle names are
+    # ignored rather than guessed at. The pair is sorted only to keep the filter
+    # canonical - it already matches either order, so "Ada Lovelace" and
+    # "Lovelace, Ada" should produce one identical filter, not two.
+    a, b = sorted((tokens[0], tokens[-1]))
+    return (
+        f"(|(&(givenname={a}*)(sn={b}*))"
+        f"(&(givenname={b}*)(sn={a}*)))"
+    )
+
+
+def _title_predicate(title: str) -> str | None:
+    # One assertion per token, ANDed, rather than one assertion for the whole
+    # phrase: "(&(..=*senior*)(..=*architect*))" matched 133 live records where
+    # "(..=*senior architect*)" matched 18, because the tokens may be separated by
+    # anything ("Senior Software Architect") or given in either order. Repeated
+    # assertions on one attribute are legal RFC 4515 and verified to work here.
+    tokens = [t.translate(_LDAP_FILTER_ESCAPES) for t in title.split()]
+    if not tokens:
+        return None
+    assertions = "".join(f"(jobresponsibilities=*{t}*)" for t in tokens)
+    # A lone assertion needs no (&...) wrapper; keeping it bare makes the single-token
+    # case - by far the common one - readable in a log.
+    return assertions if len(tokens) == 1 else f"(&{assertions})"
+
+
+def _compose_filter(query: str = "", title: str = "") -> str | None:
+    # Predicate order is part of this function's contract: hractive, then name, then
+    # title. Tests assert exact filter strings, so reordering is a breaking change.
+    # None means "nothing to search" - the caller must not fall back to a bare
+    # (hractive=A), which matches the entire active directory.
+    predicates = [p for p in (_name_predicate(query), _title_predicate(title)) if p]
+    if not predicates:
+        return None
     # hractive=A keeps results to current employees, and trims the payload of a
     # broad query by ~20% on the way.
-    return f"(&(hractive=A){name_filter})"
+    return f"(&(hractive=A){''.join(predicates)})"
+
+
+def _search_filter(query: str) -> str | None:
+    # Name-only shim, kept so the measured prefix rules above stay covered by their
+    # original tests verbatim.
+    return _compose_filter(query=query)
 
 
 async def _none() -> None:
@@ -184,16 +229,22 @@ class EmployeeService:
         # deliberate, narrow exception to the "no cache in v1" rule in CLAUDE.md.
         self._place_cache: dict[str, tuple[str | None, str | None]] = {}
 
-    async def search(self, query: str, max_results: int | None = None) -> tuple[list[Employee], bool]:
+    async def search(
+        self, query: str = "", title: str = "", max_results: int | None = None
+    ) -> tuple[list[Employee], bool, int]:
         limit = max_results or settings.search_max_results
 
-        # One SLAPHAPI query against sn/givenname, which is also the profile
-        # endpoint's source - so a person's name is built the same way whichever
-        # screen it lands on. SLAPHAPI applies no size limit of its own, hence the
-        # client-side truncation below and the prefix guard in _search_filter.
-        search_filter = _search_filter(query)
+        # One SLAPHAPI query against sn/givenname and/or jobresponsibilities, which
+        # is also the profile endpoint's source - so a person's name is built the
+        # same way whichever screen it lands on. SLAPHAPI applies no size limit of
+        # its own, hence the client-side truncation below and the length guards in
+        # _name_predicate / _title_predicate.
+        search_filter = _compose_filter(query=query, title=title)
         if search_filter is None:
-            return [], False
+            # Defence in depth: the router rejects this case with a 422 first. A bare
+            # (hractive=A) would match the whole active directory, which measured
+            # 154MB+ without completing, so never let one be built.
+            return [], False, 0
         records = await self._slaphapi_client.query(
             "ibmperson",
             search_filter,
@@ -201,11 +252,15 @@ class EmployeeService:
         )
 
         employees = [_slaphapi_record_to_employee(r) for r in records]
-        truncated = len(employees) > limit
+        # The pre-truncation count is reported so the UI can say "50 of 4,109" - a
+        # broad title filter collapses thousands of people into an arbitrary 50, and
+        # a bare "truncated" flag reads as the directory being nearly empty.
+        total_matched = len(employees)
+        truncated = total_matched > limit
         page = employees[:limit]
         # Cities are attached after truncation so we only look up offices we show.
         await self._attach_places(page, records[:limit])
-        return page, truncated
+        return page, truncated, total_matched
 
     async def get_by_id(self, employee_id: str) -> Employee | None:
         records = await self._client.query("byCnum", employee_id)

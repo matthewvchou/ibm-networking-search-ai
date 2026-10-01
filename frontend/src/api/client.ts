@@ -23,9 +23,19 @@ export interface Employee {
   department_name: string | null
 }
 
-interface SearchResponse {
+export interface SearchResponse {
   results: Employee[]
   truncated: boolean
+  // Match count before the server truncated to `limit`. A broad job-title filter
+  // collapses thousands of people into an arbitrary page, so the UI reports
+  // "50 of 4,109" rather than a bare "truncated".
+  total_matched: number
+}
+
+export interface SearchFilters {
+  // Substring match against the directory's job-title field. Sparse - only about a
+  // quarter of records carry one - so the UI says so next to the input.
+  title?: string
 }
 
 interface DirectReportsResponse {
@@ -51,13 +61,31 @@ async function get<T>(path: string, signal?: AbortSignal): Promise<T> {
     if (res.status === 503) {
       throw new Error('unavailable')
     }
-    throw new Error(`request failed: ${res.status}`)
+    if (res.status === 504) {
+      throw new Error('timeout')
+    }
+    // 422 was unreachable before filters existed; now it carries the reason a search
+    // was rejected, so surface the backend's message instead of a bare status code.
+    const detail = await res
+      .json()
+      .then((body: { detail?: string }) => body.detail)
+      .catch(() => undefined)
+    throw new Error(detail ?? `request failed: ${res.status}`)
   }
   return res.json() as Promise<T>
 }
 
-export function searchEmployees(query: string, signal?: AbortSignal): Promise<SearchResponse> {
-  return get<SearchResponse>(`/api/employees/search?q=${encodeURIComponent(query)}`, signal)
+export function searchEmployees(
+  query: string,
+  filters: SearchFilters = {},
+  signal?: AbortSignal,
+): Promise<SearchResponse> {
+  // Only set values are sent, so a name-only search produces the same request it
+  // always did.
+  const params = new URLSearchParams()
+  if (query.trim()) params.set('q', query.trim())
+  if (filters.title?.trim()) params.set('title', filters.title.trim())
+  return get<SearchResponse>(`/api/employees/search?${params.toString()}`, signal)
 }
 
 export function getEmployee(id: string): Promise<Employee> {

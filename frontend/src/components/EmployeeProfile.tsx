@@ -7,7 +7,8 @@ import type { Employee } from '../api/client'
 interface EmployeeProfileProps {
   employee: Employee
   manager: Employee | null
-  q?: string | null
+  // The originating search string, re-emitted so filters survive navigation.
+  backTo?: string
 }
 
 // Google Maps' documented search-query form. `address` is deliberately postal
@@ -25,7 +26,7 @@ function DetailRow({ icon, children }: { icon: ReactNode; children: ReactNode })
   )
 }
 
-export function EmployeeProfile({ employee, manager, q }: EmployeeProfileProps) {
+export function EmployeeProfile({ employee, manager, backTo }: EmployeeProfileProps) {
   const department = employee.department_name ?? employee.department
 
   // One location element, not two: "City, State" reads as the label, the office
@@ -50,7 +51,7 @@ export function EmployeeProfile({ employee, manager, q }: EmployeeProfileProps) 
     ))
 
   const managerLink = manager && (
-    <RouterLink to={`/employee/${manager.id}${q ? `?q=${encodeURIComponent(q)}` : ''}`}>
+    <RouterLink to={`/employee/${manager.id}${backTo ? `?${backTo}` : ''}`}>
       {manager.display_name}
     </RouterLink>
   )
