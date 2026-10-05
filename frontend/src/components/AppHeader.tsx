@@ -1,7 +1,16 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
-import { Header, HeaderName, Link as CarbonLink, Search } from '@carbon/react'
+import {
+  Header,
+  HeaderGlobalAction,
+  HeaderGlobalBar,
+  HeaderName,
+  Link as CarbonLink,
+  Search,
+} from '@carbon/react'
+import { Asleep, Light } from '@carbon/icons-react'
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router'
+import { useColorTheme } from '../theme/ColorTheme'
 
 export function AppHeader() {
   const location = useLocation()
@@ -9,6 +18,7 @@ export function AppHeader() {
   const [searchParams] = useSearchParams()
   const q = searchParams.get('q')
   const [inputValue, setInputValue] = useState('')
+  const { isDark, toggleTheme } = useColorTheme()
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -17,6 +27,7 @@ export function AppHeader() {
   }
 
   const isEmployeeDetail = location.pathname.startsWith('/employee/')
+  const themeLabel = isDark ? 'Switch to light mode' : 'Switch to dark mode'
 
   return (
     <Header aria-label="IBM Directory">
@@ -36,6 +47,8 @@ export function AppHeader() {
         </form>
       )}
       {isEmployeeDetail && (
+        // The auto margin right-aligns the link; the global bar then shrinks to its
+        // own content rather than eating the free space (auto margins win over flex-grow).
         <CarbonLink
           as={Link}
           to={q ? `/?q=${encodeURIComponent(q)}` : '/'}
@@ -44,6 +57,16 @@ export function AppHeader() {
           {q ? '← Back to search results' : '← Back to search'}
         </CarbonLink>
       )}
+      <HeaderGlobalBar>
+        <HeaderGlobalAction
+          aria-label={themeLabel}
+          tooltipAlignment="end"
+          isActive={isDark}
+          onClick={toggleTheme}
+        >
+          {isDark ? <Light size={20} /> : <Asleep size={20} />}
+        </HeaderGlobalAction>
+      </HeaderGlobalBar>
     </Header>
   )
 }
