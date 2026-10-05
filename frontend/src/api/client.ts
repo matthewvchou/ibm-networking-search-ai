@@ -1,25 +1,45 @@
 export interface Employee {
   id: string
+  // Always "First Last". `last_name` carries the surname on its own, for sorting -
+  // it can't be recovered from display_name (multi-word surnames exist).
   display_name: string
+  last_name: string
   email: string | null
   title: string | null
   department: string | null
   location: string | null
   manager_id: string | null
+  // WSAPI's MGR flag. True for people who manage someone, so the org chart can show
+  // an expand chevron only where there is something to expand. Always false on the
+  // search endpoint, which reads SLAPHAPI.
+  is_manager: boolean
   photo_url: string | null
   office_phone: string | null
   mobile_phone: string | null
   address: string | null
   org_unit: string | null
+  city: string | null
+  state: string | null
+  building: string | null
   // Only populated by the enriched single-employee endpoint; `department` is the raw code.
   employee_type: string | null
   company: string | null
   department_name: string | null
 }
 
-interface SearchResponse {
+export interface SearchResponse {
   results: Employee[]
   truncated: boolean
+  // Match count before the server truncated to `limit`. A broad job-title filter
+  // collapses thousands of people into an arbitrary page, so the UI reports
+  // "50 of 4,109" rather than a bare "truncated".
+  total_matched: number
+}
+
+export interface SearchFilters {
+  // Substring match against the directory's job-title field. Sparse - only about a
+  // quarter of records carry one - so the UI says so next to the input.
+  title?: string
 }
 
 interface DirectReportsResponse {
@@ -45,13 +65,31 @@ async function get<T>(path: string, signal?: AbortSignal): Promise<T> {
     if (res.status === 503) {
       throw new Error('unavailable')
     }
-    throw new Error(`request failed: ${res.status}`)
+    if (res.status === 504) {
+      throw new Error('timeout')
+    }
+    // 422 was unreachable before filters existed; now it carries the reason a search
+    // was rejected, so surface the backend's message instead of a bare status code.
+    const detail = await res
+      .json()
+      .then((body: { detail?: string }) => body.detail)
+      .catch(() => undefined)
+    throw new Error(detail ?? `request failed: ${res.status}`)
   }
   return res.json() as Promise<T>
 }
 
-export function searchEmployees(query: string, signal?: AbortSignal): Promise<SearchResponse> {
-  return get<SearchResponse>(`/api/employees/search?q=${encodeURIComponent(query)}`, signal)
+export function searchEmployees(
+  query: string,
+  filters: SearchFilters = {},
+  signal?: AbortSignal,
+): Promise<SearchResponse> {
+  // Only set values are sent, so a name-only search produces the same request it
+  // always did.
+  const params = new URLSearchParams()
+  if (query.trim()) params.set('q', query.trim())
+  if (filters.title?.trim()) params.set('title', filters.title.trim())
+  return get<SearchResponse>(`/api/employees/search?${params.toString()}`, signal)
 }
 
 export function getEmployee(id: string): Promise<Employee> {

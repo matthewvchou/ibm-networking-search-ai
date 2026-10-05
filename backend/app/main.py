@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api.routers import employees, health
-from app.core.exceptions import BluepagesUnavailableException
+from app.core.exceptions import BluepagesUnavailableException, DirectoryTimeoutException
 
 app = FastAPI()
 
@@ -16,6 +16,19 @@ app.add_middleware(
 
 app.include_router(employees.router)
 app.include_router(health.router)
+
+
+# DirectoryTimeoutException subclasses BluepagesUnavailableException, and Starlette
+# picks a handler by walking the exception's MRO, so this more specific handler wins
+# over the 503 one below regardless of registration order. A timed-out search is an
+# expected outcome for a broad job-title substring, not an outage - reporting it as
+# 503 told the user the directory was down when it wasn't.
+@app.exception_handler(DirectoryTimeoutException)
+async def directory_timeout_handler(request: Request, exc: DirectoryTimeoutException) -> JSONResponse:
+    return JSONResponse(
+        status_code=504,
+        content={"detail": "Search timed out. Try a more specific name or job title."},
+    )
 
 
 @app.exception_handler(BluepagesUnavailableException)
