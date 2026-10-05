@@ -5,6 +5,18 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>frontend</title>
+    <!-- Apply the saved Carbon theme zone class before first paint, so a dark-mode
+         reload doesn't flash a white page before React mounts. Mirrors the logic in
+         src/theme/ColorTheme.tsx; the provider re-applies the same class on mount. -->
+    <script>
+      try {
+        var stored = localStorage.getItem('ibm-directory-theme')
+        var dark = stored ? stored === 'g100' : window.matchMedia('(prefers-color-scheme: dark)').matches
+        document.documentElement.classList.add(dark ? 'cds--g100' : 'cds--g10')
+      } catch (e) {
+        document.documentElement.classList.add('cds--g10')
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>
