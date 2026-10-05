@@ -15,6 +15,11 @@ class Employee(BaseModel):
     department: str | None = None
     location: str | None = None
     manager_id: str | None = None
+    # From WSAPI's MGR (Y/N), so the org chart can show an expand affordance only on
+    # people who actually manage someone. The SLAPHAPI path leaves it False: the LDAP
+    # record carries no equivalent flag. Note MGR is an HR manager indicator, so a Y
+    # with zero current reports is legitimate - the UI handles that case.
+    is_manager: bool = False
     photo_url: str | None = None
     office_phone: str | None = None
     mobile_phone: str | None = None

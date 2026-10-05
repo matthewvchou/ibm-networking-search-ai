@@ -88,6 +88,22 @@ def _slaphapi_name(record: dict[str, str]) -> tuple[str, str]:
     return _name_part(record.get("cn")), ""
 
 
+# Some live records carry the literal four-character string "null" in a free-text
+# field - measured on JOBRESPONSIB - which renders as a job title of "null" unless it
+# is treated as absent here. Only "null" is listed because only "null" was observed;
+# don't add speculative sentinels that might swallow a real value.
+_PLACEHOLDER_TEXT = {"null"}
+
+
+def _clean_text(value: str | None) -> str | None:
+    if value is None:
+        return None
+    stripped = value.strip()
+    if not stripped or stripped.casefold() in _PLACEHOLDER_TEXT:
+        return None
+    return stripped
+
+
 def _record_to_employee(record: dict[str, str]) -> Employee:
     display_name, last_name = _wsapi_name(record)
     return Employee(
@@ -95,10 +111,11 @@ def _record_to_employee(record: dict[str, str]) -> Employee:
         display_name=display_name,
         last_name=last_name,
         email=record.get("INTERNET") or None,
-        title=record.get("JOBRESPONSIB") or None,
+        title=_clean_text(record.get("JOBRESPONSIB")),
         department=record.get("DEPT") or None,
         location=record.get("COUNTRY") or None,
         manager_id=record.get("MNUM") or None,
+        is_manager=record.get("MGR", "").strip().upper() == "Y",
     )
 
 
@@ -120,7 +137,7 @@ def _slaphapi_record_to_employee(record: dict[str, str]) -> Employee:
         display_name=display_name,
         last_name=last_name,
         email=record.get("mail") or None,
-        title=record.get("jobresponsibilities") or None,
+        title=_clean_text(record.get("jobresponsibilities")),
         department=record.get("dept") or None,
         location=record.get("co") or None,
         manager_id=_manager_id_from_slaphapi(record),

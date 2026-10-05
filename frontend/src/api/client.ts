@@ -9,6 +9,10 @@ export interface Employee {
   department: string | null
   location: string | null
   manager_id: string | null
+  // WSAPI's MGR flag. True for people who manage someone, so the org chart can show
+  // an expand chevron only where there is something to expand. Always false on the
+  // search endpoint, which reads SLAPHAPI.
+  is_manager: boolean
   photo_url: string | null
   office_phone: string | null
   mobile_phone: string | null

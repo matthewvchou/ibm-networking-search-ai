@@ -14,3 +14,26 @@ body {
   stroke: var(--border);
   stroke-width: 1.5px;
 }
+
+/* Pending state for an org-chart node whose reports are being fetched. A CSS
+   animation needs a real stylesheet rule, so it can't live inline on the card. */
+.org-chart-spinner {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  animation: org-chart-spin 0.7s linear infinite;
+}
+
+@keyframes org-chart-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .org-chart-spinner {
+    animation-duration: 2s;
+  }
+}

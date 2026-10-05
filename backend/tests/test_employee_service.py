@@ -9,6 +9,8 @@ from urllib.parse import quote
 from app.services.employee_service import (
     TITLE_SUBSTRING_MIN_LENGTH,
     _compose_filter,
+    _clean_text,
+    _record_to_employee,
     _search_filter,
     _slaphapi_name,
     _title_predicate,
@@ -188,3 +190,30 @@ def test_filter_quoting_preserves_the_filter_grammar():
     assert quoted == composed.replace(" ", "%20")
     for char in "()&|=*":
         assert char in quoted
+
+
+def test_record_to_employee_reads_the_manager_flag():
+    # WSAPI spells the flag MGR and answers Y/N on every employee record.
+    assert _record_to_employee({"CNUM": "000000001", "MGR": "Y"}).is_manager is True
+    assert _record_to_employee({"CNUM": "000000002", "MGR": "N"}).is_manager is False
+
+
+def test_record_to_employee_defaults_the_manager_flag_to_false():
+    # A record without MGR degrades to "no expand affordance" rather than offering one
+    # that resolves to nothing.
+    assert _record_to_employee({"CNUM": "000000003"}).is_manager is False
+
+
+def test_clean_text_drops_the_literal_null_placeholder():
+    # Measured on live JOBRESPONSIB values: a record whose job title is the string
+    # "null" must read as having no title, not a title of "null".
+    assert _clean_text("null") is None
+    assert _clean_text("NULL") is None
+    assert _clean_text("  ") is None
+    assert _clean_text(None) is None
+    # A real title containing the substring is untouched.
+    assert _clean_text("Nullsoft Engineer") == "Nullsoft Engineer"
+
+
+def test_record_to_employee_blanks_a_null_job_title():
+    assert _record_to_employee({"CNUM": "000000004", "JOBRESPONSIB": "null"}).title is None
