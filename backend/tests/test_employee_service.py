@@ -8,8 +8,11 @@ from urllib.parse import quote
 
 from app.services.employee_service import (
     TITLE_SUBSTRING_MIN_LENGTH,
+    _NON_PERSON_EMPLOYEE_TYPES,
     _compose_filter,
     _clean_text,
+    _is_non_person_slaphapi,
+    _is_non_person_wsapi,
     _record_to_employee,
     _search_filter,
     _slaphapi_name,
@@ -217,3 +220,64 @@ def test_clean_text_drops_the_literal_null_placeholder():
 
 def test_record_to_employee_blanks_a_null_job_title():
     assert _record_to_employee({"CNUM": "000000004", "JOBRESPONSIB": "null"}).title is None
+
+
+def test_non_person_employee_types_are_only_the_two_documented_codes():
+    # The live ibmemployeetype table has 17 codes and exactly these two are titled
+    # "non-Person" - N "Functional Id" and Q "Entry owned by specific Application".
+    # Pinned by value so widening the set has to be a deliberate edit: the neighbouring
+    # codes are people, and sweeping in C (contractor), V (vendor) or B (business
+    # partner) would hide real colleagues.
+    assert _NON_PERSON_EMPLOYEE_TYPES == frozenset({"N", "Q"})
+
+
+def test_non_person_wsapi_matches_both_non_person_codes():
+    assert _is_non_person_wsapi({"CNUM": "C-AAAA001", "EMPTYPE": "N"}) is True
+    assert _is_non_person_wsapi({"CNUM": "C-AAAA002", "EMPTYPE": "Q"}) is True
+
+
+def test_non_person_wsapi_admits_every_kind_of_person():
+    # P is a regular IBM employee; C, V and B are non-IBM employees - contractor,
+    # vendor and business partner - but all three are people with a real name.
+    for code in ("P", "C", "V", "B", "H", "J", "X", "O", "L", "A"):
+        assert _is_non_person_wsapi({"CNUM": "000000001", "EMPTYPE": code}) is False
+
+
+def test_non_person_wsapi_treats_a_missing_or_blank_type_as_a_person():
+    # Fail open: a record with no EMPTYPE is a record we cannot classify, and hiding
+    # someone from their own org chart is worse than showing one stray service account.
+    assert _is_non_person_wsapi({"CNUM": "000000001"}) is False
+    assert _is_non_person_wsapi({"CNUM": "000000001", "EMPTYPE": ""}) is False
+    assert _is_non_person_wsapi({}) is False
+
+
+def test_non_person_wsapi_normalizes_case_and_whitespace():
+    assert _is_non_person_wsapi({"EMPTYPE": " n "}) is True
+    assert _is_non_person_wsapi({"EMPTYPE": "q"}) is True
+
+
+def test_non_person_slaphapi_reads_the_lowercased_attribute():
+    # SlaphapiClient._parse lowercases every attribute name.
+    assert _is_non_person_slaphapi({"uid": "C-AAAA001", "employeetype": "N"}) is True
+    assert _is_non_person_slaphapi({"uid": "C-AAAA002", "employeetype": "Q"}) is True
+    assert _is_non_person_slaphapi({"uid": "000000001", "employeetype": "P"}) is False
+    assert _is_non_person_slaphapi({"uid": "000000001"}) is False
+    assert _is_non_person_slaphapi({"employeetype": " q "}) is True
+
+
+def test_non_person_predicates_do_not_read_each_others_field():
+    # The two directories spell the field differently - EMPTYPE on WSAPI, employeetype
+    # on SLAPHAPI - so a predicate reaching for the wrong key would silently never
+    # match and quietly let every functional ID back through.
+    assert _is_non_person_wsapi({"employeetype": "N"}) is False
+    assert _is_non_person_slaphapi({"EMPTYPE": "N"}) is False
+
+
+def test_non_person_decision_ignores_the_name_marker():
+    # Non-person records label themselves in the name too ("*FUNCTIONAL-ID*"), but the
+    # code is the field we trust; measured live, the two never disagree. A person whose
+    # name happened to contain the marker text is still a person.
+    assert _is_non_person_wsapi(
+        {"CNUM": "000000001", "EMPTYPE": "P", "NAME": "Fakename *FUNCTIONAL-ID*"}
+    ) is False
+    assert _is_non_person_wsapi({"CNUM": "C-AAAA001", "EMPTYPE": "N", "NAME": "Example Helpdesk"}) is True

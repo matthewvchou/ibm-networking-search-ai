@@ -44,6 +44,26 @@ _LDAP_FILTER_ESCAPES = str.maketrans(
 # name could live under any of these. First populated one wins.
 _DEPT_NAME_ATTRS = ("description", "hrorganizationdisplay", "hrorganizationname", "ou", "cn")
 
+# Directory records that are not people. These are the only two codes in the live
+# ibmemployeetype table (17 of them, the same table _resolve_employee_type reads) whose
+# title begins "non-Person": N is "Functional Id" - a shared group/service account such
+# as a helpdesk - and Q is "Entry owned by specific Application". Everything else is a
+# human, including the non-IBM-employee codes B (business partner), C (contractor),
+# V (vendor), G (IP partner) and H (non-integrated business, e.g. Red Hat), so this set
+# must stay narrow.
+#
+# These records also carry their category in the name ("ISV Recaptcha *FUNCTIONAL-ID*",
+# "XForceExchange *APPLICATION-ID*"), but the marker is redundant with the code and the
+# code is the authoritative field: measured live, no record carries the marker without
+# the code or the code without the marker. Match on the code only.
+#
+# Search does not need this filter - it is applied there only as defence in depth.
+# Non-person records carry no hractive attribute at all, so the (&(hractive=A)...) in
+# _compose_filter already excludes them; the path that actually leaked them into the UI
+# is the WSAPI org chart, where directReportsOf takes no filter expression and the
+# exclusion therefore has to happen after parsing.
+_NON_PERSON_EMPLOYEE_TYPES = frozenset({"N", "Q"})
+
 
 def _name_part(value: str | None) -> str:
     # Commas are stripped rather than kept: dirty records put one *inside* a single
@@ -104,6 +124,11 @@ def _clean_text(value: str | None) -> str | None:
     return stripped
 
 
+def _is_non_person_wsapi(record: dict[str, str]) -> bool:
+    # WSAPI vocabulary: uppercase keys, employee type under EMPTYPE.
+    return record.get("EMPTYPE", "").strip().upper() in _NON_PERSON_EMPLOYEE_TYPES
+
+
 def _record_to_employee(record: dict[str, str]) -> Employee:
     display_name, last_name = _wsapi_name(record)
     return Employee(
@@ -128,6 +153,13 @@ def _manager_id_from_slaphapi(record: dict[str, str]) -> str | None:
         if match:
             return match.group(1)
     return record.get("managerserialnumber") or None
+
+
+def _is_non_person_slaphapi(record: dict[str, str]) -> bool:
+    # SLAPHAPI vocabulary: SlaphapiClient._parse lowercases every attribute name, so the
+    # field is "employeetype" here and EMPTYPE on the WSAPI side. Kept as a separate
+    # function for the same reason _slaphapi_name and _wsapi_name are separate.
+    return record.get("employeetype", "").strip().upper() in _NON_PERSON_EMPLOYEE_TYPES
 
 
 def _slaphapi_record_to_employee(record: dict[str, str]) -> Employee:
@@ -267,6 +299,13 @@ class EmployeeService:
             search_filter,
             timeout=settings.slaphapi_search_timeout_seconds,
         )
+        # Defence in depth only - (hractive=A) already excludes non-person records, which
+        # carry no hractive at all, so this is a no-op in practice. It filters the raw
+        # records rather than the mapped employees because _attach_places pairs the two
+        # lists positionally; dropping from one side alone would slide every city/state
+        # onto the wrong row. total_matched therefore counts people, which is what the
+        # UI's "50 of 4,109" should mean.
+        records = [r for r in records if not _is_non_person_slaphapi(r)]
 
         employees = [_slaphapi_record_to_employee(r) for r in records]
         # The pre-truncation count is reported so the UI can say "50 of 4,109" - a
@@ -283,6 +322,10 @@ class EmployeeService:
         records = await self._client.query("byCnum", employee_id)
         if not records:
             return None
+        if _is_non_person_wsapi(records[0]):
+            # Reads as "no such employee", which is the whole point: get_org_chart already
+            # returns None on a None root and get_manager_chain already returns [].
+            return None
         return _record_to_employee(records[0])
 
     async def get_enriched_by_id(self, employee_id: str) -> Employee | None:
@@ -290,6 +333,10 @@ class EmployeeService:
         if not records:
             return None
         record = records[0]
+        if _is_non_person_slaphapi(record):
+            # Checked before the label lookups below, so a non-person costs one request
+            # rather than six. The router turns this into the same 404 as a bad id.
+            return None
         employee = _slaphapi_record_to_employee(record)
 
         work_loc = record.get("workloc")
@@ -400,7 +447,11 @@ class EmployeeService:
 
     async def get_direct_reports(self, employee_id: str) -> list[Employee]:
         records = await self._client.query("directReportsOf", employee_id)
-        return [_record_to_employee(r) for r in records]
+        # Functional and application IDs are dropped here rather than at the call sites,
+        # which is what keeps _build_org_node's has_more_reports honest: a manager whose
+        # only remaining reports were non-person records becomes a real leaf instead of a
+        # node offering a "click to load more" affordance that would expand into nothing.
+        return [_record_to_employee(r) for r in records if not _is_non_person_wsapi(r)]
 
     async def get_manager_chain(self, employee_id: str) -> list[Employee]:
         self_employee = await self.get_by_id(employee_id)
