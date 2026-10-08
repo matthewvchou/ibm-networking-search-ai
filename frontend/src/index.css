@@ -10,6 +10,26 @@ body {
   margin: 0;
 }
 
+/* The sector is the one tag on the profile card that has to read in full. Carbon caps a
+   tag at 13rem and ellipsises its label on a single line, which hides most of a name like
+   "Software Development & Support". The tag itself already uses min-block-size and
+   word-break, so lifting the width cap and the label's nowrap is all it takes for the
+   bubble to grow onto a second line. Needs a stylesheet because the label is an inner
+   span that an inline style cannot reach. */
+.profile-sector-tag {
+  max-inline-size: 100%;
+  padding-block: 0.125rem;
+}
+
+.profile-sector-tag .cds--tag__label {
+  overflow: visible;
+  white-space: normal;
+  text-overflow: clip;
+  /* Centres the label when the bubble is taller than its own text - which happens because
+     the tag row stretches its children, so a one-line sector still gets the row's height. */
+  margin-block: auto;
+}
+
 .org-chart-canvas .rd3t-link {
   stroke: var(--border);
   stroke-width: 1.5px;
