@@ -14,6 +14,12 @@ class Employee(BaseModel):
     title: str | None = None
     department: str | None = None
     location: str | None = None
+    # ISO alpha-2 country code (hrcountrycode), kept separate from `location`, which holds
+    # the friendly country *name*. The name is what the profile falls back to when a person
+    # has no city; the code is what the search card's location tag ends in, because the name
+    # is long and inconsistent (the same country arrives as "United States of America",
+    # "United States", and the UK as "N.Ireland & England & Scotland & Wales (United Kingdom)").
+    country_code: str | None = None
     manager_id: str | None = None
     # From WSAPI's MGR (Y/N), so the org chart can show an expand affordance only on
     # people who actually manage someone. The SLAPHAPI path leaves it False: the LDAP
@@ -24,6 +30,10 @@ class Employee(BaseModel):
     office_phone: str | None = None
     mobile_phone: str | None = None
     address: str | None = None
+    # The sector ("Consulting", "Software", ...), resolved from hrOrganizationCode via
+    # ibmorganization. Unlike the other resolved labels below, this one is populated on
+    # the search endpoint too, because the search card shows it in place of the raw
+    # `department` code.
     org_unit: str | None = None
     city: str | None = None
     state: str | None = None

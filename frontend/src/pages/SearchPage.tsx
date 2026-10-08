@@ -20,8 +20,6 @@ export function SearchPage() {
   const [titleValue, setTitleValue] = useState(title)
 
   const [results, setResults] = useState<Employee[]>([])
-  const [truncated, setTruncated] = useState(false)
-  const [totalMatched, setTotalMatched] = useState(0)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -33,8 +31,6 @@ export function SearchPage() {
     setTitleValue(t)
     if (!q && !t) {
       setResults([])
-      setTruncated(false)
-      setTotalMatched(0)
       setError(null)
       return
     }
@@ -45,14 +41,10 @@ export function SearchPage() {
       .then((data) => {
         if (cancelled) return
         setResults(data.results)
-        setTruncated(data.truncated)
-        setTotalMatched(data.total_matched)
       })
       .catch((err) => {
         if (cancelled) return
         setResults([])
-        setTruncated(false)
-        setTotalMatched(0)
         setError(errorMessage(err))
       })
       .finally(() => {
@@ -79,14 +71,26 @@ export function SearchPage() {
   }
 
   return (
-    <div style={{ maxWidth: 700, margin: '0 auto', padding: 24 }}>
-      <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+    // 20px between the header and the search field. Carbon's .cds--content puts 32px of
+    // padding above this and the 40px-tall Search sits 8px into its row (bottom-aligned
+    // against the 48px button), so hitting 20 means pulling 20 back off the shell's
+    // padding. Done here rather than on Content, which every page shares.
+    <div style={{ maxWidth: 1200, margin: '-20px auto 0', padding: '0 24px 24px' }}>
+      {/* The page is wide enough for a four-column result grid, but the inputs are not
+          improved by being 1200px long - hence the cap on the form. It then sits 40px left
+          of the grid's first column: the offset is on the form alone so the grid stays put.
+          Safe at every width - the shell's 32px padding plus the wrapper's 24px leave 56px
+          to borrow from, so even a 320px viewport keeps 16px of margin. */}
+      <form
+        onSubmit={handleSubmit}
+        style={{ display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 700, marginLeft: -40 }}
+      >
         <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8 }}>
           <div style={{ flex: 1 }}>
             <Search
               id="employee-search"
               labelText="Search employees"
-              placeholder='Search by name (e.g. "Chou, Matthew" or last name only)…'
+              placeholder="Search by name"
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
             />
@@ -95,11 +99,20 @@ export function SearchPage() {
             Search
           </Button>
         </div>
+        {/* hideLabel rather than no label: the visible "Job title contains (optional)"
+            caption is gone, but the field still needs an accessible name, and the
+            placeholder alone is not one. */}
         <TextInput
           id="employee-search-title"
           labelText="Job title contains (optional)"
-          placeholder='e.g. "architect", "site reliability"'
-          helperText="Only about a quarter of employees have a job title recorded, so this will miss people."
+          hideLabel
+          placeholder="Search by job title"
+          helperText={
+            <em>
+              *Only about a quarter of employees have a job title recorded, so this will miss
+              people.
+            </em>
+          }
           value={titleValue}
           onChange={(e) => setTitleValue(e.target.value)}
         />
@@ -112,8 +125,6 @@ export function SearchPage() {
         loading={loading}
         error={error}
         results={results}
-        truncated={truncated}
-        totalMatched={totalMatched}
       />
     </div>
   )

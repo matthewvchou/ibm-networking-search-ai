@@ -8,6 +8,9 @@ export interface Employee {
   title: string | null
   department: string | null
   location: string | null
+  // ISO alpha-2 (hrcountrycode). The search card's location tag ends in this; `location`
+  // is the full country name the profile falls back to.
+  country_code: string | null
   manager_id: string | null
   // WSAPI's MGR flag. True for people who manage someone, so the org chart can show
   // an expand chevron only where there is something to expand. Always false on the
