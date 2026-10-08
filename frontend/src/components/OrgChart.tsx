@@ -13,6 +13,7 @@ import {
   ZoomOut,
 } from '@carbon/icons-react'
 import { getDirectReports } from '../api/client'
+import { AvatarCircle } from './AvatarCircle'
 import type { Employee, OrgNode } from '../api/client'
 
 const CARD_WIDTH = 184
@@ -50,13 +51,6 @@ type ChildFetch =
   | { status: 'done'; children: Employee[] }
 
 type ExpandedMap = Record<string, ChildFetch>
-
-function initialsOf(name: string): string {
-  const parts = name.split(' ').filter(Boolean)
-  const first = parts[0]?.[0] ?? ''
-  const last = parts.length > 1 ? parts[parts.length - 1]?.[0] ?? '' : ''
-  return (first + last).toUpperCase()
-}
 
 // `title` is recorded for only a minority of employees, and the endpoints behind the
 // chart return `department` as a raw code, so fall through until something is there.
@@ -578,23 +572,7 @@ export function OrgChart({ managerChain, orgNode, peers, selectedId, selfEmploye
             }}
             title={[nodeDatum.name, subtitle].filter(Boolean).join(' · ')}
           >
-            <div
-              style={{
-                flexShrink: 0,
-                width: 28,
-                height: 28,
-                borderRadius: '50%',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: 11,
-                fontWeight: 600,
-                color: isSelf ? '#fff' : 'var(--text-h)',
-                background: isSelf ? 'var(--accent)' : 'var(--border)',
-              }}
-            >
-              {initialsOf(nodeDatum.name)}
-            </div>
+            <AvatarCircle id={id} name={nodeDatum.name} size={28} isSelf={isSelf} />
             <div style={{ minWidth: 0, flex: 1 }}>
               <div style={ellipsis(12, 600, 'var(--text-h)')}>{nodeDatum.name}</div>
               {/* Always rendered, even when empty: the depth pitch is one constant, so

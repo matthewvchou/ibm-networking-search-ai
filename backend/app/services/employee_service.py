@@ -172,6 +172,7 @@ def _slaphapi_record_to_employee(record: dict[str, str]) -> Employee:
         title=_clean_text(record.get("jobresponsibilities")),
         department=record.get("dept") or None,
         location=record.get("co") or None,
+        country_code=record.get("hrcountrycode") or None,
         manager_id=_manager_id_from_slaphapi(record),
         office_phone=record.get("telephonenumber") or None,
         mobile_phone=record.get("mobile") or None,
@@ -277,6 +278,10 @@ class EmployeeService:
         # search resolves the same handful of offices over and over. This is a
         # deliberate, narrow exception to the "no cache in v1" rule in CLAUDE.md.
         self._place_cache: dict[str, tuple[str | None, str | None]] = {}
+        # hrOrganizationCode -> sector ("Consulting", "Software", ...), same rationale and
+        # same narrow exception: 584 codes collapse to 70 display values, so a few searches
+        # warm it and later pages resolve for free.
+        self._org_unit_cache: dict[str, str] = {}
 
     async def search(
         self, query: str = "", title: str = "", max_results: int | None = None
@@ -314,8 +319,13 @@ class EmployeeService:
         total_matched = len(employees)
         truncated = total_matched > limit
         page = employees[:limit]
-        # Cities are attached after truncation so we only look up offices we show.
-        await self._attach_places(page, records[:limit])
+        # Both are attached after truncation so we only resolve what we show, and
+        # concurrently with each other - they hit different tables.
+        shown = records[:limit]
+        await asyncio.gather(
+            self._attach_places(page, shown),
+            self._attach_org_units(page, shown),
+        )
         return page, truncated, total_matched
 
     async def get_by_id(self, employee_id: str) -> Employee | None:
@@ -393,6 +403,34 @@ class EmployeeService:
             # would poison every later search that touches this office.
             self._place_cache[work_loc] = place
         return place
+
+    async def _attach_org_units(self, employees: list[Employee], records: list[dict[str, str]]) -> None:
+        # The sector shown on a search card. Person records carry only the org *code*
+        # ("KY"), so the readable value comes from ibmorganization.
+        #
+        # Resolved in ONE batched request rather than per distinct code: a 50-row page
+        # spans ~41 distinct codes (measured), and 41 round-trips would roughly triple
+        # the request count of a search. An OR filter over the uncached codes answers
+        # all of them in ~0.7s. No chunking: the page is capped at `search_max_results`,
+        # so the filter tops out around 1.2KB.
+        codes = sorted({c for r in records if (c := r.get("hrorganizationcode"))})
+        missing = [c for c in codes if c not in self._org_unit_cache]
+        if missing:
+            filter_expr = "(|" + "".join(f"(hrOrganizationCode={c})" for c in missing) + ")"
+            try:
+                found = await self._slaphapi_client.query("ibmorganization", filter_expr)
+            except BluepagesUnavailableException:
+                # Secondary to the person record, so a directory error degrades to "no
+                # sector" rather than failing the search. Same contract as _lookup.
+                found = []
+            for record in found:
+                code = record.get("hrorganizationcode")
+                sector = record.get("hrorganizationdisplay") or record.get("hrorganizationname")
+                if code and sector:
+                    # Successes only, for the reason given on _place_cache.
+                    self._org_unit_cache[code] = sector
+        for employee, record in zip(employees, records):
+            employee.org_unit = self._org_unit_cache.get(record.get("hrorganizationcode") or "")
 
     async def _attach_places(self, employees: list[Employee], records: list[dict[str, str]]) -> None:
         # Person records carry the office code but no city or state, so both have to

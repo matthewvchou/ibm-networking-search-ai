@@ -1,14 +1,35 @@
+import { useState } from 'react'
 import type { ReactNode } from 'react'
 import { Button, Tag, Tile } from '@carbon/react'
 import { Email, Enterprise, Launch, Location, Mobile, Phone, UserFollow } from '@carbon/icons-react'
 import { Link as RouterLink } from 'react-router'
 import type { Employee } from '../api/client'
+import { getPhotoUrl } from '../api/photos'
 
 interface EmployeeProfileProps {
   employee: Employee
   manager: Employee | null
   // The originating search string, re-emitted so filters survive navigation.
   backTo?: string
+}
+
+const PHOTO_SIZE = 120
+
+// Shown whole rather than cropped to a circle - the source is already a square - and
+// omitted entirely when the employee has no photo, rather than standing in a placeholder.
+function ProfilePhoto({ employee }: { employee: Employee }) {
+  const [failed, setFailed] = useState(false)
+  if (failed) return null
+  return (
+    <img
+      src={getPhotoUrl(employee.id, PHOTO_SIZE * 2)}
+      alt={employee.display_name}
+      width={PHOTO_SIZE}
+      height={PHOTO_SIZE}
+      onError={() => setFailed(true)}
+      style={{ display: 'block', flexShrink: 0, width: PHOTO_SIZE, height: PHOTO_SIZE }}
+    />
+  )
 }
 
 // Google Maps' documented search-query form. `address` is deliberately postal
@@ -58,8 +79,9 @@ export function EmployeeProfile({ employee, manager, backTo }: EmployeeProfilePr
 
   return (
     <Tile>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16 }}>
-        <div>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16 }}>
+        <ProfilePhoto employee={employee} />
+        <div style={{ flex: 1, minWidth: 0 }}>
           <h2 style={{ margin: 0, fontSize: '2rem', fontWeight: 600, lineHeight: 1.25, color: 'var(--text-h)' }}>
             {employee.display_name}
           </h2>
@@ -69,18 +91,6 @@ export function EmployeeProfile({ employee, manager, backTo }: EmployeeProfilePr
           )}
         </div>
 
-        <Button
-          as="a"
-          href={`https://w3.ibm.com/#/people/${employee.id}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          kind="tertiary"
-          size="sm"
-          renderIcon={Launch}
-          style={{ flexShrink: 0 }}
-        >
-          W3 Page
-        </Button>
       </div>
 
       {(department || employee.org_unit || employee.employee_type) && (
@@ -122,6 +132,19 @@ export function EmployeeProfile({ employee, manager, backTo }: EmployeeProfilePr
           </DetailRow>
         )}
       </div>
+
+      <Button
+        as="a"
+        href={`https://w3.ibm.com/#/people/${employee.id}`}
+        target="_blank"
+        rel="noopener noreferrer"
+        kind="tertiary"
+        size="sm"
+        renderIcon={Launch}
+        style={{ marginTop: 16 }}
+      >
+        W3 Page
+      </Button>
     </Tile>
   )
 }
