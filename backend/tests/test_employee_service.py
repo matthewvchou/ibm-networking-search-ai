@@ -16,6 +16,7 @@ from app.services.employee_service import (
     _record_to_employee,
     _search_filter,
     _slaphapi_name,
+    _slaphapi_record_to_employee,
     _title_predicate,
     _wsapi_name,
 )
@@ -220,6 +221,16 @@ def test_clean_text_drops_the_literal_null_placeholder():
 
 def test_record_to_employee_blanks_a_null_job_title():
     assert _record_to_employee({"CNUM": "000000004", "JOBRESPONSIB": "null"}).title is None
+
+
+def test_slaphapi_record_to_employee_takes_the_country_code_from_hrcountrycode():
+    # The search card's location tag ends in the 2-letter code, not `co`: measured across
+    # 322 live records the same country arrives as "United States of America" and
+    # "United States", while hrcountrycode is uniform and populated on every record.
+    record = {"uid": "000000005", "sn": "Lovelace", "givenname": "Ada", "hrcountrycode": "GB", "co": "United Kingdom"}
+    employee = _slaphapi_record_to_employee(record)
+    assert employee.country_code == "GB"
+    assert employee.location == "United Kingdom"
 
 
 def test_non_person_employee_types_are_only_the_two_documented_codes():
