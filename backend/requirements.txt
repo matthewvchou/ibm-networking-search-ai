@@ -1,6 +1,8 @@
 fastapi
 uvicorn[standard]
 httpx
+markitdown[pdf,docx]
+truststore
 pydantic-settings
 pytest
 pytest-asyncio

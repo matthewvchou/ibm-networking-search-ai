@@ -3,7 +3,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api.routers import employees, health
-from app.core.exceptions import BluepagesUnavailableException, DirectoryTimeoutException
+from app.core.exceptions import (
+    BluepagesUnavailableException,
+    DirectoryTimeoutException,
+    SummaryUnavailableException,
+)
 
 app = FastAPI()
 
@@ -34,3 +38,10 @@ async def directory_timeout_handler(request: Request, exc: DirectoryTimeoutExcep
 @app.exception_handler(BluepagesUnavailableException)
 async def bluepages_unavailable_handler(request: Request, exc: BluepagesUnavailableException) -> JSONResponse:
     return JSONResponse(status_code=503, content={"detail": "Directory service unavailable"})
+
+
+# Carries a machine-readable `reason` alongside the usual `detail`, so the summary panel
+# can tell "no resume on file" (a normal state) from a failure, and say why it failed.
+@app.exception_handler(SummaryUnavailableException)
+async def summary_unavailable_handler(request: Request, exc: SummaryUnavailableException) -> JSONResponse:
+    return JSONResponse(status_code=exc.status_code, content={"reason": exc.reason, "detail": exc.message})
