@@ -4,11 +4,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-An internal IBM employee-directory / org-chart tool. v1 scope is **Bluepages-backed directory search and org chart browsing** (search, employee profile, direct reports, manager chain), plus one deliberate expansion: an **AI-generated summary of one person's resume** on their profile (see "Resume summaries" below). That summary is strictly per-person. The README's longer-term vision (AI-driven "similar career path" matching between employees) is still out of scope — no embeddings, no cross-person comparison, don't build toward it unless asked.
+An internal IBM employee-directory / org-chart tool. v1 scope is **Bluepages-backed directory search and org chart browsing** (search, employee profile, direct reports, manager chain), plus one deliberate expansion: an **AI-generated summary of one person's resume** on their profile (see "Resume summaries" below). That summary is strictly per-person. The frontend is a Carbon-based app with a light/dark theme; `ChatPanel.tsx` exists as a "Chat is not available yet" placeholder but is **not rendered anywhere** and no assistant backend exists. The README's longer-term vision (AI-driven "similar career path" matching between employees) is still out of scope — no embeddings, no cross-person comparison, don't build toward it unless asked.
 
 Monorepo: `backend/` (Python/FastAPI) + `frontend/` (Vite/React/TypeScript). One repo, not two — the two halves are built in lockstep by a single developer.
 
 ## Commands
+
+### Both halves at once (Windows)
+```
+start.bat         # repo root
+```
+Creates `backend/.venv` and installs requirements on first run, runs `npm install` if `frontend/node_modules` is missing, copies `backend/.env.example` to `backend/.env` if there is no `.env`, then opens the backend (`:8000`) and the Vite dev server (`:5180`) in two windows and launches the browser. It deliberately starts uvicorn **without** `--reload` (see the Windows note below). It is a launcher, not a bundle: Python 3 and Node must be on PATH.
 
 ### Backend (`backend/`)
 ```
@@ -26,7 +32,7 @@ Note: on Windows, `uvicorn --reload` has been flaky when many files change at on
 ### Frontend (`frontend/`)
 ```
 npm install
-npm run dev       # Vite dev server, default :5173 (falls back to next free port if occupied)
+npm run dev       # Vite dev server on :5180 (strictPort: fails rather than picking another port)
 npm run build      # tsc -b && vite build
 npm run lint       # oxlint
 ```
@@ -154,15 +160,28 @@ Errors are `SummaryUnavailableException(reason, message, status)` → `{reason, 
 
 Measured on synthetic resumes only: `gpt-6-luna` returns valid unfenced JSON for both schemas (2–3s warm, ~9s cold); a planted-errors summary scored 33 and every planted error was flagged; a clean full loop took ~19s. **Not measured: a worst-case 4-attempt run on a real, long resume**, which is estimated at 100s+ and rides on one blocking `GET` — if a browser or proxy cuts it, move generation behind a `POST` and poll. The model catalog is `GET {ICA_BASE_URL}/chat-models/models`. Only ~15% of people have a resume at all.
 
-### Frontend: intentionally minimal test harness, plus one real component
+### Frontend: Carbon UI, router, no data-fetching library
 
-`frontend/src/App.tsx` is a thin **router** (`react-router`, no React Query): `/` renders `AppLayout` (header + `<Outlet/>`), with `SearchPage` at the index and `EmployeeDetailPage` at `/employee/:id`. The search query lives in the URL (`?q=`), and clicking a search row or an org-chart node navigates by id — the detail page always re-fetches rather than carrying an employee object over from the list payload. It's still a thin harness rather than the eventual product structure. `frontend/src/api/client.ts` is a thin typed `fetch` wrapper, one function per backend endpoint, and is the only place that knows the backend's JSON response shapes.
+`frontend/src/App.tsx` is a **router** (`react-router`, no React Query) wrapped in `ColorThemeProvider`: `/` renders `AppLayout` (Carbon `Theme` + `AppHeader` + `<Outlet/>` + `ThemeToggleButton`), with `SearchPage` at the index, `EmployeeDetailPage` at `/employee/:id`, and `NotFoundPage` as the catch-all. The search state lives in the URL (`?q=` for name, `?title=` for job title), and clicking a search card or an org-chart node navigates by id — the detail page always re-fetches rather than carrying an employee object over from the list payload, and it carries the whole search string through so the filters survive a trip into a profile and back. `AppHeader` shows a compact search box on every page except `/`, and a "Back to search" link on profiles.
 
-Search results are a **card grid**, not a list: `EmployeeSearchResults.tsx` lays the page's cards out with `grid-template-columns: repeat(auto-fill, minmax(260px, 1fr))`, which is what makes the column count fall out of the available width — 4 on a full desktop, then 3 / 2 / 1 as it narrows — with no media queries and no resize listener. That matters because the app has no stylesheet to put a media query in (`index.css` is five custom properties plus three org-chart rules) and inline styles cannot express one. The 260px floor is paired with `SearchPage.tsx`'s `maxWidth: 1200` wrapper: four tracks plus three 16px gaps is 1088, a fifth would need 1364, so a full desktop lands on exactly 4 — move one of those two numbers and the column count changes. Note Carbon's `Content` adds 2rem of its own padding on top of the page's 24px. The form keeps its own `maxWidth: 700` so the inputs don't stretch the full width. `PAGE_SIZE` is 32 (eight rows of four) against a 50-result response, so a broad search is two pages (32 + 18); the frontend sends no `limit`, and the route would accept up to 100 (`clamped_limit`). The endpoint still returns `truncated` and `total_matched` and `SearchResponse` still types them, but **nothing in the UI reads them** — the "Showing 50 of 374 matches" notice they fed was removed deliberately, so don't wire it back in as a fix for the numbers looking unused.
+Theming: Carbon `g10` (light) / `g100` (dark), chosen by `theme/ColorTheme.tsx` from `localStorage` (`ibm-directory-theme`, every access guarded because it throws in some privacy modes), else `prefers-color-scheme`. The zone class goes on `<html>` as well as the `Theme` wrapper so the page background and portalled elements match. Carbon styles are pulled in by `styles/carbon.scss`; `index.css` maps Carbon tokens to `--accent`/`--bg`/`--border`/`--text`/`--text-h`, which the inline-styled components read.
+
+`frontend/src/api/client.ts` is a thin typed `fetch` wrapper, one function per backend endpoint, and is the only place that knows the backend's JSON response shapes.
+
+Search results are a **card grid**, not a list: `EmployeeSearchResults.tsx` lays the page's cards out with `grid-template-columns: repeat(auto-fill, minmax(260px, 1fr))`, which is what makes the column count fall out of the available width — 4 on a full desktop, then 3 / 2 / 1 as it narrows — with no media queries and no resize listener. That matters because the components are styled inline and inline styles cannot express a media query; `index.css` holds only the token aliases plus the few rules that need a real selector (the profile sector tag, the org-chart link colour and spinner). The 260px floor is paired with `SearchPage.tsx`'s `maxWidth: 1200` wrapper: four tracks plus three 16px gaps is 1088, a fifth would need 1364, so a full desktop lands on exactly 4 — move one of those two numbers and the column count changes. Note Carbon's `Content` adds 2rem of its own padding on top of the page's 24px. The form keeps its own `maxWidth: 700` so the inputs don't stretch the full width. `PAGE_SIZE` is 32 (eight rows of four) against a 50-result response, so a broad search is two pages (32 + 18); the frontend sends no `limit`, and the route would accept up to 100 (`clamped_limit`). The endpoint still returns `truncated` and `total_matched` and `SearchResponse` still types them, but **nothing in the UI reads them** — the "Showing 50 of 374 matches" notice they fed was removed deliberately, so don't wire it back in as a fix for the numbers looking unused.
 
 `EmployeeDetailPage` is two rows: the profile card and `ResumeSummaryPanel` share the top row 2:3 (flex-wrap stacks them when narrow), and the org chart takes the full width below. The panel is keyed on the route id and fetches on its own, so the slow summary call starts alongside the profile fetch rather than after it; `no_resume` renders as a plain "No resume on file", any other reason as a warning with the backend's message.
 
-`frontend/src/components/OrgChart.tsx` is the main piece of real, dedicated UI in the frontend. It renders a single `react-d3-tree` tree combining the ancestor chain (from `getManagerChain`) and the descendant subtree (from `getOrgChart`) into one `RawNodeDatum` tree — there's no in-place expand/collapse state; clicking any node (ancestor or descendant) just calls `onSelect(id)`, which re-runs `App.tsx`'s `selectEmployee` and re-centers the whole view on that person. Nodes at the `has_more_reports` boundary get a dashed accent border as a "click to load more" affordance. If you need to tune layout, `nodeSize`/`separation`/the container's fixed height are the levers — increasing tree depth or org width without adjusting these will clip labels against the container's bottom edge.
+`EmployeeDetailPage` fetches the profile (`getEmployee`), manager chain and a **depth-1** org chart in parallel, then fetches the direct manager's reports (`getDirectReports`) as the "peers" row. A failed peer lookup is swallowed on purpose: it costs the peer row, not the page. The profile's manager comes from `managerChain[1]` (index 0 is the person).
+
+`frontend/src/components/OrgChart.tsx` (the largest component) renders one `react-d3-tree` tree built by `buildTreeData` from four sources: the person (`orgNodeToRaw`), their reports, their peers, and the manager chain above them. Layout rules that are easy to break:
+- **Peers are leaves**, laid out by `rowAround` around the selected person (others sorted by surname, split either side so the spine stays centred). A peer's reports load only when its chevron is clicked; don't rebuild the row from `getOrgChart`.
+- **The manager chain folds**: the direct manager and skip-level manager stay as nodes and anything above collapses into one "N more managers" node that expands to the full chain. The skip-level manager can itself be expanded to show the manager's peers.
+- **Expansion state is `ExpandedMap`** (`loading | error | empty | done` per employee id), fetched via `getDirectReports` on chevron click. `empty` is remembered so a flagged manager with no reports isn't refetched. At the payload edge `has_more_reports` decides whether a chevron is drawn; for peers and on-demand children it falls back to `is_manager`, which is an HR flag and over-reports (11 of 20 flagged vs 8 with reports on the org measured).
+- **Clicking a card** calls `onSelect(id)`, which navigates to that person's page; the chart is keyed on the employee id, so expansions, folding and viewport reset per person. Only the chevron expands in place.
+- Node size, separation, zoom limits and the card constants (`CARD_WIDTH`, `CARD_HEIGHT`, `LINK_CLEARANCE`, `NODE_SIZE`) are one coupled set; changing one without the others clips labels or breaks link routing. The view is anchored on the selected card (`SELECTED_Y_FRACTION`) and re-anchored around an expansion so the card you clicked doesn't jump.
+
+The remaining components are `EmployeeProfile` (photo, contact, location as a Maps link, sector tag), `EmployeeSearchResults` + `AvatarCircle` (card grid), and the summary UI: `ResumeSummaryPanel` (state machine: loading / loaded / no-resume / error, polls `/summary/progress` once a second while busy, owns the regenerate button), `AttemptProgress` (one row per attempt), `SummaryBody`, and `VerificationBanner` (score tag and flagged claims, `PASS_SCORE` mirrors the backend's 80).
 
 ## Endpoint contract
 
