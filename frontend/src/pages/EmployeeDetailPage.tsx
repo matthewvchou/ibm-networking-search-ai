@@ -4,6 +4,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router'
 import { getDirectReports, getEmployee, getManagerChain, getOrgChart } from '../api/client'
 import type { Employee, OrgNode } from '../api/client'
 import { errorMessage } from '../api/errors'
+import { ChatPanel } from '../components/ChatPanel'
 import { EmployeeProfile } from '../components/EmployeeProfile'
 import { OrgChart } from '../components/OrgChart'
 import { ResumeSummaryPanel } from '../components/ResumeSummaryPanel'
@@ -73,6 +74,28 @@ export function EmployeeDetailPage() {
           row is far wider than either card. */}
       <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start', gap: 24 }}>
         <div style={{ flex: '2 1 380px', minWidth: 0 }}>
+    // Carbon's Content already lays 2rem above this page, which overshoots the 30px gap
+    // wanted under the header - hence no top padding of our own and a 2px pull-up, the
+    // same trick SearchPage uses to claw back Content's padding.
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 24,
+        padding: '0 24px 24px',
+        marginTop: -2,
+        boxSizing: 'border-box',
+      }}
+    >
+      {/* Exactly 2/5 and 3/5 of the row at every width: the flex-basis pair is in the same
+          2:3 ratio as the grow pair and sums to 900, so the 24px gap is charged to each
+          column in precisely the proportion the grow factors would. Edit one basis without
+          the other and the split silently stops being exact. flex-wrap rather than a media
+          query (index.css is the only stylesheet, and inline styles cannot express one)
+          stacks the row below ~1036px of viewport. align-items defaults to stretch, which
+          is what makes the chat tile match the profile card's height. */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 24, width: '100%', maxWidth: 1200, margin: '0 auto' }}>
+        <div style={{ flex: '2 1 360px', minWidth: 0 }}>
           {loading && (
             <div style={{ marginTop: 16 }}>
               <SkeletonText paragraph lineCount={3} />
@@ -108,6 +131,27 @@ export function EmployeeDetailPage() {
             }
           />
         </div>
+        <div style={{ flex: '3 1 540px', minWidth: 0 }}>
+          <ChatPanel />
+        </div>
+      </div>
+
+      {/* Full width below the row, deliberately outside the 1200 cap: a full peer row is far
+          wider than either tile above it. */}
+      {orgChart && employee && (
+        <OrgChart
+          // Remount per employee, so expansions, the folded manager chain and the
+          // viewport all reset rather than carrying over to a different person.
+          key={employee.id}
+          managerChain={managerChain}
+          orgNode={orgChart}
+          peers={peers}
+          selfEmployee={employee}
+          selectedId={employee.id}
+          onSelect={(selectedId) =>
+            navigate(`/employee/${selectedId}${backTo ? `?${backTo}` : ''}`)
+          }
+        />
       )}
     </div>
   )

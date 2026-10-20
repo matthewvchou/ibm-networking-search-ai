@@ -661,9 +661,10 @@ export function OrgChart({ managerChain, orgNode, peers, selectedId, selfEmploye
         className="org-chart-canvas"
         style={{
           width: '100%',
-          // Bounded and panned rather than grown: a wide peer row is thousands of
-          // pixels of layout, and the page has no spare vertical budget.
-          height: 'clamp(520px, calc(100vh - 220px), 820px)',
+          // Bounded and panned rather than grown: a wide peer row is thousands of pixels
+          // of layout. The chart sits below the profile/chat row, so it is scrolled to
+          // rather than fitted above the fold - hence a near-viewport height.
+          height: 'clamp(520px, calc(100vh - 120px), 900px)',
           marginTop: 16,
           borderRadius: 8,
           overflow: 'hidden',
