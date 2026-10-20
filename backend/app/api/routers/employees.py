@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException
 
 from app.models.employee import Employee, OrgNode
-from app.models.resume_summary import ResumeSummaryResponse
+from app.models.resume_summary import ResumeSummaryResponse, SummaryProgress
 from app.services.employee_service import TITLE_SUBSTRING_MIN_LENGTH, EmployeeService
 from app.services.resume_summary_service import ResumeSummaryService
 
@@ -60,6 +60,23 @@ async def get_summary(employee_id: str) -> ResumeSummaryResponse:
     # SummaryUnavailableException, which main.py turns into {reason, detail}.
     summary = await _summary_service.get_summary(employee_id)
     return ResumeSummaryResponse(summary=summary, resume_url=_summary_service.resume_url(employee_id))
+
+
+@router.get("/{employee_id}/summary/progress", response_model=SummaryProgress)
+async def get_summary_progress(employee_id: str) -> SummaryProgress:
+    # Polled while /summary is pending; reads an in-memory map and never calls out.
+    return _summary_service.get_progress(employee_id)
+
+
+@router.post("/{employee_id}/summary/regenerate", response_model=ResumeSummaryResponse)
+async def regenerate_summary(employee_id: str) -> ResumeSummaryResponse:
+    result = await _summary_service.regenerate(employee_id)
+    return ResumeSummaryResponse(
+        summary=result.summary,
+        resume_url=_summary_service.resume_url(employee_id),
+        replaced=result.replaced,
+        attempted_score=result.attempted_score,
+    )
 
 
 @router.get("/{employee_id}/org-chart", response_model=OrgNode)

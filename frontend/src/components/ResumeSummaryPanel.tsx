@@ -1,9 +1,11 @@
-import { useEffect, useState } from 'react'
-import type { ReactNode } from 'react'
-import { Accordion, AccordionItem, InlineNotification, SkeletonText, Tag, Tile } from '@carbon/react'
-import { Launch } from '@carbon/icons-react'
-import { getSummary, SummaryError } from '../api/client'
-import type { ResumeSummary, ResumeSummaryResponse } from '../api/client'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { Button, InlineNotification, SkeletonText, Tag, Tile } from '@carbon/react'
+import { Launch, Renew } from '@carbon/icons-react'
+import { getSummary, getSummaryProgress, regenerateSummary, SummaryError } from '../api/client'
+import type { ResumeSummary, ResumeSummaryResponse, SummaryProgress } from '../api/client'
+import { AttemptProgress } from './AttemptProgress'
+import { SummaryBody } from './SummaryBody'
+import { PASS_SCORE, ScoreTag, VerificationDetails } from './VerificationBanner'
 
 interface ResumeSummaryPanelProps {
   employeeId: string
@@ -15,17 +17,27 @@ type PanelState =
   | { kind: 'no-resume' }
   | { kind: 'error'; message: string }
 
+const POLL_INTERVAL_MS = 1000
 const muted = { color: 'var(--text)' }
 
 /**
  * The AI-generated resume summary for one employee. Fetches on its own, so the
  * profile and org chart never wait on the (slow) summary call.
  *
- * Everything the model wrote is rendered as plain text - never as HTML or Markdown -
- * because resume text is untrusted input to the model.
+ * While that call runs, the first draft appears as soon as the backend has it, marked
+ * "Verifying…", and each regeneration shows as its own progress row. Everything the model
+ * wrote is rendered as plain text - never as HTML or Markdown - because resume text is
+ * untrusted input to the model.
  */
 export function ResumeSummaryPanel({ employeeId }: ResumeSummaryPanelProps) {
   const [state, setState] = useState<PanelState>({ kind: 'loading' })
+  const [progress, setProgress] = useState<SummaryProgress | null>(null)
+  const [isRegenerating, setIsRegenerating] = useState(false)
+  const [notice, setNotice] = useState<string | null>(null)
+  const draftTextRef = useRef<string | null>(null)
+
+  const isBusy = state.kind === 'loading' || isRegenerating
+  usePolledProgress(employeeId, isBusy, setProgress)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -42,131 +54,142 @@ export function ResumeSummaryPanel({ employeeId }: ResumeSummaryPanelProps) {
     return () => controller.abort()
   }, [employeeId])
 
+  // A draft whose text changes under the reader is explained, not swapped silently.
+  const draft = progress?.draft ?? null
+  useEffect(() => {
+    if (!draft) return
+    if (draftTextRef.current !== null && draftTextRef.current !== draft.summary) {
+      setNotice('This summary was updated after a re-check scored higher.')
+    }
+    draftTextRef.current = draft.summary
+  }, [draft])
+
+  const regenerate = useCallback(async () => {
+    setIsRegenerating(true)
+    setNotice(null)
+    try {
+      const data = await regenerateSummary(employeeId)
+      setState({ kind: 'loaded', data })
+      if (!data.replaced) {
+        setNotice(`The new attempt scored ${data.attempted_score ?? 'lower'}%, so the previous summary was kept.`)
+      }
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : 'Regenerating failed.')
+    } finally {
+      setIsRegenerating(false)
+    }
+  }, [employeeId])
+
   return (
     <Tile style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        <h4 style={{ margin: 0, color: 'var(--text-h)' }}>Resume summary</h4>
-        <Tag type="purple" size="sm">
-          AI-generated from resume
-        </Tag>
-        {state.kind === 'loaded' && (
-          <a
-            href={state.data.resume_url}
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 4 }}
-          >
-            View original resume <Launch size={14} />
-          </a>
-        )}
-      </div>
+      <Header state={state} progress={progress} isRegenerating={isRegenerating} />
 
-      {state.kind === 'loading' && (
-        <div>
-          <SkeletonText paragraph lineCount={4} />
-          <p style={{ ...muted, margin: 0 }}>Summarizing their resume. This can take around 10 seconds.</p>
-        </div>
-      )}
+      {state.kind === 'loading' && <LoadingBody progress={progress} draft={draft} />}
       {state.kind === 'no-resume' && <p style={{ ...muted, margin: 0 }}>No resume on file.</p>}
       {state.kind === 'error' && (
         <InlineNotification kind="warning" title="Summary unavailable" subtitle={state.message} hideCloseButton lowContrast />
       )}
-      {state.kind === 'loaded' && <SummaryBody summary={state.data.summary} />}
+      {state.kind === 'loaded' && (
+        <>
+          <SummaryBody summary={state.data.summary} />
+          <VerificationDetails verification={state.data.summary.verification} isVerifying={false} />
+          {isRegenerating && progress && <AttemptProgress progress={progress} />}
+          {!isRegenerating && needsRegeneration(state.data.summary) && (
+            <div>
+              <Button kind="tertiary" size="sm" renderIcon={Renew} onClick={regenerate}>
+                Regenerate
+              </Button>
+            </div>
+          )}
+        </>
+      )}
+      {notice && (
+        <InlineNotification kind="info" title="" subtitle={notice} hideCloseButton lowContrast onClose={() => setNotice(null)} />
+      )}
     </Tile>
   )
 }
 
-function SummaryBody({ summary }: { summary: ResumeSummary }) {
-  const { cv } = summary
-  const hasCv = cv.experience.length + cv.skills.length + cv.education.length + cv.certifications.length > 0
+function Header({
+  state,
+  progress,
+  isRegenerating,
+}: {
+  state: PanelState
+  progress: SummaryProgress | null
+  isRegenerating: boolean
+}) {
+  const verification = state.kind === 'loaded' ? state.data.summary.verification : (progress?.draft?.verification ?? null)
+  const hasDraft = state.kind === 'loading' && progress?.draft != null
+  const isVerifying = isRegenerating || (hasDraft && !progress?.is_draft_verified)
   return (
-    <>
-      {summary.headline && <p style={{ margin: 0, fontWeight: 600, color: 'var(--text-h)' }}>{summary.headline}</p>}
-      {summary.summary && <p style={{ margin: 0, color: 'var(--text-h)' }}>{summary.summary}</p>}
-
-      {summary.specialties.length > 0 && (
-        <Section title="Specialties">
-          {summary.specialties.map((s) => (
-            <EvidenceItem key={s.name} label={s.name} evidence={s.evidence} />
-          ))}
-        </Section>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+      <h4 style={{ margin: 0, color: 'var(--text-h)' }}>Resume summary</h4>
+      <Tag type="purple" size="sm" style={{ margin: 0 }}>
+        AI-generated from resume
+      </Tag>
+      {(state.kind === 'loaded' || hasDraft) && <ScoreTag verification={verification} isVerifying={isVerifying} />}
+      {state.kind === 'loaded' && (
+        <a
+          href={state.data.resume_url}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+        >
+          View original resume <Launch size={14} />
+        </a>
       )}
-      {summary.ask_them_about.length > 0 && (
-        <Section title="Ask them about">
-          {summary.ask_them_about.map((a) => (
-            <EvidenceItem key={a.topic} label={a.topic} evidence={a.evidence} />
-          ))}
-        </Section>
-      )}
-
-      {hasCv && (
-        <Accordion align="start">
-          <AccordionItem title="Full CV">
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              {cv.experience.length > 0 && (
-                <Section title="Experience">
-                  {cv.experience.map((e) => (
-                    <li key={`${e.role}-${e.organization}-${e.start}`}>
-                      <span style={{ color: 'var(--text-h)' }}>{[e.role, e.organization].filter(Boolean).join(' · ')}</span>
-                      {e.start && <span style={muted}> — {e.start}–{e.end ?? 'present'}</span>}
-                    </li>
-                  ))}
-                </Section>
-              )}
-              {cv.skills.length > 0 && (
-                <Section title="Skills">
-                  {cv.skills.map((g) => (
-                    <li key={g.category}>
-                      <span style={{ color: 'var(--text-h)' }}>{g.category}:</span>{' '}
-                      <span style={muted}>{g.items.join(', ')}</span>
-                    </li>
-                  ))}
-                </Section>
-              )}
-              {cv.education.length > 0 && (
-                <Section title="Education">
-                  {cv.education.map((e) => (
-                    <li key={`${e.degree}-${e.institution}`}>
-                      <span style={{ color: 'var(--text-h)' }}>{[e.degree, e.institution].filter(Boolean).join(', ')}</span>
-                      {e.year && <span style={muted}> — {e.year}</span>}
-                    </li>
-                  ))}
-                </Section>
-              )}
-              {cv.certifications.length > 0 && (
-                <Section title="Certifications">
-                  {cv.certifications.map((c) => (
-                    <li key={c.name}>
-                      <span style={{ color: 'var(--text-h)' }}>{c.name}</span>
-                      {c.year && <span style={muted}> — {c.year}</span>}
-                    </li>
-                  ))}
-                </Section>
-              )}
-            </div>
-          </AccordionItem>
-        </Accordion>
-      )}
-    </>
-  )
-}
-
-function Section({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <div>
-      <h5 style={{ margin: '0 0 8px', color: 'var(--text-h)' }}>{title}</h5>
-      <ul style={{ margin: 0, paddingLeft: 20, listStyle: 'disc', display: 'flex', flexDirection: 'column', gap: 4 }}>
-        {children}
-      </ul>
     </div>
   )
 }
 
-function EvidenceItem({ label, evidence }: { label: string; evidence: string }) {
+/** The skeleton until a draft exists, then the draft itself with the attempt rows beneath. */
+function LoadingBody({ progress, draft }: { progress: SummaryProgress | null; draft: ResumeSummary | null }) {
   return (
-    <li>
-      <span style={{ color: 'var(--text-h)' }}>{label}</span>
-      {evidence && <span style={{ ...muted, fontSize: 12 }}> — {evidence}</span>}
-    </li>
+    <>
+      {draft ? (
+        <>
+          <SummaryBody summary={draft} />
+          <VerificationDetails verification={draft.verification} isVerifying={!progress?.is_draft_verified} />
+        </>
+      ) : (
+        <SkeletonText paragraph lineCount={4} />
+      )}
+      {progress && <AttemptProgress progress={progress} />}
+      {!draft && <p style={{ ...muted, margin: 0 }}>Summarizing their resume. This can take around 15 seconds.</p>}
+    </>
   )
+}
+
+/** Below the pass mark, or never graded: the cases where another attempt may help. */
+function needsRegeneration(summary: ResumeSummary): boolean {
+  const score = summary.verification?.score ?? null
+  return score === null || score < PASS_SCORE
+}
+
+/** Polls the backend's progress board once a second while `isActive`, ignoring late replies. */
+function usePolledProgress(
+  employeeId: string,
+  isActive: boolean,
+  setProgress: (progress: SummaryProgress | null) => void,
+) {
+  useEffect(() => {
+    if (!isActive) return
+    const controller = new AbortController()
+    const poll = () => {
+      getSummaryProgress(employeeId, controller.signal)
+        .then((next) => {
+          if (!controller.signal.aborted) setProgress(next)
+        })
+        .catch(() => {
+          // Progress is cosmetic: a missed poll just leaves the last rows on screen.
+        })
+    }
+    poll()
+    const timer = window.setInterval(poll, POLL_INTERVAL_MS)
+    return () => {
+      controller.abort()
+      window.clearInterval(timer)
+    }
+  }, [employeeId, isActive, setProgress])
 }
