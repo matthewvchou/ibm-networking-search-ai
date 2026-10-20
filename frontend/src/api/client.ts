@@ -59,6 +59,41 @@ export interface OrgNode {
   has_more_reports: boolean
 }
 
+// An AI-generated digest of the employee's resume. Every field may be empty - a sparse
+// resume yields empty fields, not invented ones. `evidence` points back into the resume
+// ("Cloud Architect, 2021-present") so a reader can check the claim.
+export interface ResumeSummary {
+  headline: string
+  summary: string
+  specialties: { name: string; evidence: string }[]
+  ask_them_about: { topic: string; evidence: string }[]
+  cv: {
+    // Most recent first; `end` null means the current role.
+    experience: { role: string; organization: string; start: string | null; end: string | null }[]
+    skills: { category: string; items: string[] }[]
+    education: { degree: string; institution: string; year: string | null }[]
+    certifications: { name: string; year: string | null }[]
+  }
+}
+
+export interface ResumeSummaryResponse {
+  summary: ResumeSummary
+  resume_url: string
+}
+
+/**
+ * A summary request that failed, carrying the backend's machine-readable `reason`
+ * ("no_resume", "ica_timeout", ...) alongside a message fit to show the user.
+ */
+export class SummaryError extends Error {
+  readonly reason: string
+
+  constructor(reason: string, message: string) {
+    super(message)
+    this.reason = reason
+  }
+}
+
 async function get<T>(path: string, signal?: AbortSignal): Promise<T> {
   const res = await fetch(path, { signal })
   if (!res.ok) {
@@ -109,4 +144,20 @@ export function getManagerChain(id: string): Promise<ManagerChainResponse> {
 
 export function getOrgChart(id: string, depth = 2): Promise<OrgNode> {
   return get<OrgNode>(`/api/employees/${encodeURIComponent(id)}/org-chart?depth=${depth}`)
+}
+
+/**
+ * Fetches the employee's resume summary. Slow on a cold cache (~10s, an LLM call).
+ *
+ * Doesn't go through `get`: every failure here carries a `reason` the panel needs in
+ * order to tell "no resume on file" from an outage, so all of them throw SummaryError.
+ */
+export async function getSummary(id: string, signal?: AbortSignal): Promise<ResumeSummaryResponse> {
+  const res = await fetch(`/api/employees/${encodeURIComponent(id)}/summary`, { signal })
+  if (res.ok) return res.json() as Promise<ResumeSummaryResponse>
+  const body = await res
+    .json()
+    .then((b: { reason?: string; detail?: string }) => b)
+    .catch(() => ({}) as { reason?: string; detail?: string })
+  throw new SummaryError(body.reason ?? 'unknown', body.detail ?? `Request failed: ${res.status}`)
 }

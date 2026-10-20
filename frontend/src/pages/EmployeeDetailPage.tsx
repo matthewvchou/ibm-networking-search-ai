@@ -6,6 +6,7 @@ import type { Employee, OrgNode } from '../api/client'
 import { errorMessage } from '../api/errors'
 import { EmployeeProfile } from '../components/EmployeeProfile'
 import { OrgChart } from '../components/OrgChart'
+import { ResumeSummaryPanel } from '../components/ResumeSummaryPanel'
 
 export function EmployeeDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -66,32 +67,33 @@ export function EmployeeDetailPage() {
   }, [id])
 
   return (
-    <div
-      style={{
-        display: 'flex',
-        flexWrap: 'wrap',
-        alignItems: 'stretch',
-        gap: 24,
-        padding: 24,
-        minHeight: 'calc(100vh - 48px)',
-        boxSizing: 'border-box',
-      }}
-    >
-      <div style={{ flex: '1 1 380px', minWidth: 0, maxWidth: 560 }}>
-        {loading && (
-          <div style={{ marginTop: 16 }}>
-            <SkeletonText paragraph lineCount={3} />
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24, padding: 24, boxSizing: 'border-box' }}>
+      {/* Profile and summary share the top row 2:3; flex-wrap stacks them on a narrow
+          viewport. The org chart gets its own full-width row below, since a full peer
+          row is far wider than either card. */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start', gap: 24 }}>
+        <div style={{ flex: '2 1 380px', minWidth: 0 }}>
+          {loading && (
+            <div style={{ marginTop: 16 }}>
+              <SkeletonText paragraph lineCount={3} />
+            </div>
+          )}
+          {error && <InlineNotification kind="error" title="Couldn't load employee" subtitle={error} hideCloseButton />}
+
+          {employee && <EmployeeProfile employee={employee} manager={managerChain[1] ?? null} backTo={backTo} />}
+        </div>
+
+        {/* Keyed on the route id, not the loaded employee, so the slow summary call
+            starts alongside the profile fetch instead of after it. */}
+        {id && !error && (
+          <div style={{ flex: '3 1 480px', minWidth: 0 }}>
+            <ResumeSummaryPanel key={id} employeeId={id} />
           </div>
         )}
-        {error && <InlineNotification kind="error" title="Couldn't load employee" subtitle={error} hideCloseButton />}
-
-        {employee && <EmployeeProfile employee={employee} manager={managerChain[1] ?? null} backTo={backTo} />}
       </div>
 
-      {/* The chart gets the larger share: a full peer row is far wider than the profile
-          card needs to be. Still flex-wrap, so a narrow viewport stacks. */}
       {orgChart && employee && (
-        <div style={{ flex: '2 1 640px', minWidth: 0 }}>
+        <div style={{ minWidth: 0 }}>
           <OrgChart
             // Remount per employee, so expansions, the folded manager chain and the
             // viewport all reset rather than carrying over to a different person.

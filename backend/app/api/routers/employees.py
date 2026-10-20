@@ -1,10 +1,13 @@
 from fastapi import APIRouter, HTTPException
 
 from app.models.employee import Employee, OrgNode
+from app.models.resume_summary import ResumeSummaryResponse
 from app.services.employee_service import TITLE_SUBSTRING_MIN_LENGTH, EmployeeService
+from app.services.resume_summary_service import ResumeSummaryService
 
 router = APIRouter(prefix="/api/employees", tags=["employees"])
 _service = EmployeeService()
+_summary_service = ResumeSummaryService(_service)
 
 
 @router.get("/search")
@@ -49,6 +52,14 @@ async def get_direct_reports(employee_id: str) -> dict:
 async def get_manager_chain(employee_id: str) -> dict:
     chain = await _service.get_manager_chain(employee_id)
     return {"chain": chain}
+
+
+@router.get("/{employee_id}/summary", response_model=ResumeSummaryResponse)
+async def get_summary(employee_id: str) -> ResumeSummaryResponse:
+    # Separate from /{employee_id} so the profile never waits on ICA. Failures raise
+    # SummaryUnavailableException, which main.py turns into {reason, detail}.
+    summary = await _summary_service.get_summary(employee_id)
+    return ResumeSummaryResponse(summary=summary, resume_url=_summary_service.resume_url(employee_id))
 
 
 @router.get("/{employee_id}/org-chart", response_model=OrgNode)
