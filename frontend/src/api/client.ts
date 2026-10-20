@@ -59,26 +59,59 @@ export interface OrgNode {
   has_more_reports: boolean
 }
 
+export interface FlaggedClaim {
+  // "summary", "skills", "experience", "education" or "certifications".
+  section: string
+  claim: string
+  // True when the claim was a skill, role, degree or certification that was taken out
+  // of the summary because the resume does not support it.
+  removed: boolean
+}
+
+// A second AI's check of how closely a summary matches the resume it was written from.
+// `score` is the share of claims supported, 0-100, and null when there was nothing to check.
+export interface Verification {
+  score: number | null
+  supported_claims: number
+  total_claims: number
+  flagged_claims: FlaggedClaim[]
+  // Generate-and-grade rounds that ran, including the first.
+  attempts: number
+}
+
 // An AI-generated digest of the employee's resume. Every field may be empty - a sparse
-// resume yields empty fields, not invented ones. `evidence` points back into the resume
-// ("Cloud Architect, 2021-present") so a reader can check the claim.
+// resume yields empty fields, not invented ones. `verification` is null when the grader
+// failed or never ran ("Not verified").
 export interface ResumeSummary {
-  headline: string
   summary: string
-  specialties: { name: string; evidence: string }[]
-  ask_them_about: { topic: string; evidence: string }[]
-  cv: {
-    // Most recent first; `end` null means the current role.
-    experience: { role: string; organization: string; start: string | null; end: string | null }[]
-    skills: { category: string; items: string[] }[]
-    education: { degree: string; institution: string; year: string | null }[]
-    certifications: { name: string; year: string | null }[]
-  }
+  skills: { category: string; items: string[] }[]
+  // Most recent first; `end` null means the current role.
+  experience: { role: string; organization: string; start: string | null; end: string | null }[]
+  education: { degree: string; institution: string; year: string | null }[]
+  certifications: { name: string; year: string | null }[]
+  verification: Verification | null
 }
 
 export interface ResumeSummaryResponse {
   summary: ResumeSummary
   resume_url: string
+  // Only meaningful after a manual regeneration: whether the new run replaced the old
+  // summary (it does only if it scored no lower), and what it scored either way.
+  replaced: boolean
+  attempted_score: number | null
+}
+
+export interface SummaryProgress {
+  status: 'idle' | 'running' | 'done'
+  attempt: number
+  max_attempts: number
+  phase: 'summarizing' | 'verifying' | 'finished'
+  // One entry per graded attempt so far; null marks an attempt the grader failed on.
+  scores: (number | null)[]
+  // The best summary so far, shown before and while it is graded. Null for a manual
+  // regeneration, which keeps the old summary on screen.
+  draft: ResumeSummary | null
+  is_draft_verified: boolean
 }
 
 /**
@@ -147,14 +180,29 @@ export function getOrgChart(id: string, depth = 2): Promise<OrgNode> {
 }
 
 /**
- * Fetches the employee's resume summary. Slow on a cold cache (~10s, an LLM call).
+ * Fetches the employee's resume summary. Slow on a cold cache: an LLM call, then a
+ * grading call, and up to three rewrites if the grade is low.
  *
  * Doesn't go through `get`: every failure here carries a `reason` the panel needs in
  * order to tell "no resume on file" from an outage, so all of them throw SummaryError.
  */
 export async function getSummary(id: string, signal?: AbortSignal): Promise<ResumeSummaryResponse> {
-  const res = await fetch(`/api/employees/${encodeURIComponent(id)}/summary`, { signal })
-  if (res.ok) return res.json() as Promise<ResumeSummaryResponse>
+  return summaryRequest(`/api/employees/${encodeURIComponent(id)}/summary`, { signal })
+}
+
+/** Runs the whole generate-and-grade loop again, bypassing the cache. */
+export async function regenerateSummary(id: string, signal?: AbortSignal): Promise<ResumeSummaryResponse> {
+  return summaryRequest(`/api/employees/${encodeURIComponent(id)}/summary/regenerate`, { method: 'POST', signal })
+}
+
+/** Where the employee's summary generation has got to; cheap, meant to be polled. */
+export async function getSummaryProgress(id: string, signal?: AbortSignal): Promise<SummaryProgress> {
+  return summaryRequest(`/api/employees/${encodeURIComponent(id)}/summary/progress`, { signal })
+}
+
+async function summaryRequest<T>(path: string, init: RequestInit): Promise<T> {
+  const res = await fetch(path, init)
+  if (res.ok) return res.json() as Promise<T>
   const body = await res
     .json()
     .then((b: { reason?: string; detail?: string }) => b)

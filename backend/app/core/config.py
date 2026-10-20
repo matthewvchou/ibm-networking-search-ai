@@ -15,7 +15,9 @@ class Settings(BaseSettings):
     # rather than failing startup, since the directory works without ICA.
     ica_api_key: str = ""
     ica_base_url: str = "https://api.servicesessentials.ibm.com/v1"
-    ica_model: str = "gpt-5.6-luna"
+    ica_model: str = "gpt-6-luna"
+    # A different, smaller model than the summarizer, so the grader is not marking its own work.
+    ica_verifier_model: str = "claude-haiku-5-5"
     ica_timeout_seconds: float = 30.0
     # The w3 unified-profile proxy. https directly: the http form only 302s here.
     resume_base_url: str = "https://w3-ui-unified-profile-proxy.w3-ui.dal.app.cirrus.ibm.com/up-api-proxy/v3/resume"
