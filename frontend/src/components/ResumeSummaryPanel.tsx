@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Button, InlineNotification, SkeletonText, Tag, Tile } from '@carbon/react'
+import { Button, InlineNotification, SkeletonText, Tile } from '@carbon/react'
 import { Launch, Renew } from '@carbon/icons-react'
 import { getSummary, getSummaryProgress, regenerateSummary, SummaryError } from '../api/client'
 import type { ResumeSummary, ResumeSummaryResponse, SummaryProgress } from '../api/client'
@@ -125,9 +125,6 @@ function Header({
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
       <h4 style={{ margin: 0, color: 'var(--text-h)' }}>Resume summary</h4>
-      <Tag type="purple" size="sm" style={{ margin: 0 }}>
-        AI-generated from resume
-      </Tag>
       {(state.kind === 'loaded' || hasDraft) && <ScoreTag verification={verification} isVerifying={isVerifying} />}
       {state.kind === 'loaded' && (
         <a

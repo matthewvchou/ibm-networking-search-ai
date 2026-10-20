@@ -33,7 +33,7 @@ export function ScoreTag({ verification, isVerifying }: ScoreTagProps) {
   if (verification === null || verification.score === null) {
     return (
       <Tag type="gray" size="sm" style={{ margin: 0 }}>
-        Not verified
+        Not Verified
       </Tag>
     )
   }
@@ -44,7 +44,7 @@ export function ScoreTag({ verification, isVerifying }: ScoreTagProps) {
       size="sm"
       style={band === 'warn' ? WARN_STYLE : { margin: 0 }}
     >
-      Accuracy check: {verification.score}%
+      Accuracy Check: {verification.score}%
     </Tag>
   )
 }

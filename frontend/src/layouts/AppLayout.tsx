@@ -1,6 +1,7 @@
 import { Content, Theme } from '@carbon/react'
 import { Outlet } from 'react-router'
 import { AppHeader } from '../components/AppHeader'
+import { ThemeToggleButton } from '../components/ThemeToggleButton'
 import { useColorTheme } from '../theme/ColorTheme'
 
 export function AppLayout() {
@@ -12,6 +13,7 @@ export function AppLayout() {
       <Content>
         <Outlet />
       </Content>
+      <ThemeToggleButton />
     </Theme>
   )
 }
