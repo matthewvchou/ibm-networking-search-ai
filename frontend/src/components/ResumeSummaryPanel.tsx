@@ -5,7 +5,7 @@ import { getSummary, getSummaryProgress, regenerateSummary, SummaryError } from 
 import type { ResumeSummary, ResumeSummaryResponse, SummaryProgress } from '../api/client'
 import { AttemptProgress } from './AttemptProgress'
 import { SummaryBody } from './SummaryBody'
-import { PASS_SCORE, ScoreTag, VerificationDetails } from './VerificationBanner'
+import { ScoreTag, VerificationDetails } from './VerificationBanner'
 
 interface ResumeSummaryPanelProps {
   employeeId: string
@@ -94,7 +94,7 @@ export function ResumeSummaryPanel({ employeeId }: ResumeSummaryPanelProps) {
           <SummaryBody summary={state.data.summary} />
           <VerificationDetails verification={state.data.summary.verification} isVerifying={false} />
           {isRegenerating && progress && <AttemptProgress progress={progress} />}
-          {!isRegenerating && needsRegeneration(state.data.summary) && (
+          {!isRegenerating && (
             <div>
               <Button kind="tertiary" size="sm" renderIcon={Renew} onClick={regenerate}>
                 Regenerate
@@ -156,12 +156,6 @@ function LoadingBody({ progress, draft }: { progress: SummaryProgress | null; dr
       {!draft && <p style={{ ...muted, margin: 0 }}>Summarizing their resume. This can take around 15 seconds.</p>}
     </>
   )
-}
-
-/** Below the pass mark, or never graded: the cases where another attempt may help. */
-function needsRegeneration(summary: ResumeSummary): boolean {
-  const score = summary.verification?.score ?? null
-  return score === null || score < PASS_SCORE
 }
 
 /** Polls the backend's progress board once a second while `isActive`, ignoring late replies. */

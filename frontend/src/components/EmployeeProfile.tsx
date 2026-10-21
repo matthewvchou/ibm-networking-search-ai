@@ -11,6 +11,9 @@ interface EmployeeProfileProps {
   manager: Employee | null
   // The originating search string, re-emitted so filters survive navigation.
   backTo?: string
+  // Shows a "Not you?" button beside "W3 Page". Only the user's own /profile passes it:
+  // it is the one place that forgets who this browser is.
+  onNotYou?: () => void
 }
 
 const PHOTO_SIZE = 120
@@ -71,7 +74,7 @@ function DetailRow({ icon, children }: { icon: ReactNode; children: ReactNode })
   )
 }
 
-export function EmployeeProfile({ employee, manager, backTo }: EmployeeProfileProps) {
+export function EmployeeProfile({ employee, manager, backTo, onNotYou }: EmployeeProfileProps) {
   const department = employee.department_name ?? employee.department
 
   // One location element, not two: "City, ST, CC" reads as the label, the office address
@@ -183,18 +186,26 @@ export function EmployeeProfile({ employee, manager, backTo }: EmployeeProfilePr
         </div>
       )}
 
-      <Button
-        as="a"
-        href={`https://w3.ibm.com/#/people/${employee.id}`}
-        target="_blank"
-        rel="noopener noreferrer"
-        kind="tertiary"
-        size="sm"
-        renderIcon={Launch}
-        style={{ marginTop: 16 }}
-      >
-        W3 Page
-      </Button>
+      <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
+        <Button
+          as="a"
+          href={`https://w3.ibm.com/#/people/${employee.id}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          kind="tertiary"
+          size="sm"
+          renderIcon={Launch}
+        >
+          W3 Page
+        </Button>
+        {/* A button, not a link: it changes state rather than navigating. Clearing the
+            identity brings the startup gate back. */}
+        {onNotYou && (
+          <Button kind="ghost" size="sm" onClick={onNotYou}>
+            Not you?
+          </Button>
+        )}
+      </div>
     </Tile>
   )
 }

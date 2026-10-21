@@ -43,6 +43,8 @@ export interface SearchFilters {
   // Substring match against the directory's job-title field. Sparse - only about a
   // quarter of records carry one - so the UI says so next to the input.
   title?: string
+  // Caps the response server-side. Omitted, the backend answers up to 50.
+  limit?: number
 }
 
 interface DirectReportsResponse {
@@ -114,6 +116,14 @@ export interface SummaryProgress {
   is_draft_verified: boolean
 }
 
+// Job-title phrases to search the directory for. `source` says what they were derived
+// from: the resume, the profile's job title when there is no resume, or neither ("none",
+// with no phrases).
+export interface KeywordSuggestions {
+  phrases: string[]
+  source: 'resume' | 'title' | 'none'
+}
+
 /**
  * A summary request that failed, carrying the backend's machine-readable `reason`
  * ("no_resume", "ica_timeout", ...) alongside a message fit to show the user.
@@ -160,6 +170,7 @@ export function searchEmployees(
   const params = new URLSearchParams()
   if (query.trim()) params.set('q', query.trim())
   if (filters.title?.trim()) params.set('title', filters.title.trim())
+  if (filters.limit) params.set('limit', String(filters.limit))
   return get<SearchResponse>(`/api/employees/search?${params.toString()}`, signal)
 }
 
@@ -198,6 +209,14 @@ export async function regenerateSummary(id: string, signal?: AbortSignal): Promi
 /** Where the employee's summary generation has got to; cheap, meant to be polled. */
 export async function getSummaryProgress(id: string, signal?: AbortSignal): Promise<SummaryProgress> {
   return summaryRequest(`/api/employees/${encodeURIComponent(id)}/summary/progress`, { signal })
+}
+
+/**
+ * Asks the backend for job-title phrases to search for, based on the employee's resume.
+ * An LLM call on a cold cache, and it fails like a summary does, with a SummaryError.
+ */
+export async function getKeywordSuggestions(id: string, signal?: AbortSignal): Promise<KeywordSuggestions> {
+  return summaryRequest(`/api/employees/${encodeURIComponent(id)}/suggestions/keywords`, { signal })
 }
 
 async function summaryRequest<T>(path: string, init: RequestInit): Promise<T> {

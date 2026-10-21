@@ -1,13 +1,16 @@
 from fastapi import APIRouter, HTTPException
 
 from app.models.employee import Employee, OrgNode
+from app.models.keyword_suggestions import KeywordSuggestions
 from app.models.resume_summary import ResumeSummaryResponse, SummaryProgress
 from app.services.employee_service import TITLE_SUBSTRING_MIN_LENGTH, EmployeeService
+from app.services.keyword_suggestion_service import KeywordSuggestionService
 from app.services.resume_summary_service import ResumeSummaryService
 
 router = APIRouter(prefix="/api/employees", tags=["employees"])
 _service = EmployeeService()
 _summary_service = ResumeSummaryService(_service)
+_keyword_service = KeywordSuggestionService(_service)
 
 
 @router.get("/search")
@@ -77,6 +80,13 @@ async def regenerate_summary(employee_id: str) -> ResumeSummaryResponse:
         replaced=result.replaced,
         attempted_score=result.attempted_score,
     )
+
+
+@router.get("/{employee_id}/suggestions/keywords", response_model=KeywordSuggestions)
+async def get_keyword_suggestions(employee_id: str) -> KeywordSuggestions:
+    # Separate from /summary so suggestions never wait on the grading loop. Failures raise
+    # SummaryUnavailableException, which main.py turns into {reason, detail}.
+    return await _keyword_service.get_suggestions(employee_id)
 
 
 @router.get("/{employee_id}/org-chart", response_model=OrgNode)
