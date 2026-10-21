@@ -1,16 +1,15 @@
 import { useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
 import { Button, Tag, Tile } from '@carbon/react'
-import { Email, Globe, Launch, Location, Mobile, Phone, UserFollow } from '@carbon/icons-react'
-import { Link as RouterLink } from 'react-router'
+import { Email, Globe, Launch, Location, Mobile, Phone } from '@carbon/icons-react'
 import type { Employee } from '../api/client'
 import { getPhotoUrl } from '../api/photos'
 
 interface EmployeeProfileProps {
   employee: Employee
-  manager: Employee | null
-  // The originating search string, re-emitted so filters survive navigation.
-  backTo?: string
+  // Shows a "Not you?" button beside "W3 Page". Only the user's own /profile passes it:
+  // it is the one place that forgets who this browser is.
+  onNotYou?: () => void
 }
 
 const PHOTO_SIZE = 120
@@ -71,7 +70,7 @@ function DetailRow({ icon, children }: { icon: ReactNode; children: ReactNode })
   )
 }
 
-export function EmployeeProfile({ employee, manager, backTo }: EmployeeProfileProps) {
+export function EmployeeProfile({ employee, onNotYou }: EmployeeProfileProps) {
   const department = employee.department_name ?? employee.department
 
   // One location element, not two: "City, ST, CC" reads as the label, the office address
@@ -98,12 +97,6 @@ export function EmployeeProfile({ employee, manager, backTo }: EmployeeProfilePr
       place
     ))
 
-  const managerLink = manager && (
-    <RouterLink to={`/employee/${manager.id}${backTo ? `?${backTo}` : ''}`}>
-      {manager.display_name}
-    </RouterLink>
-  )
-
   return (
     <Tile>
       <div
@@ -114,8 +107,6 @@ export function EmployeeProfile({ employee, manager, backTo }: EmployeeProfilePr
           // than its top or bottom edge.
           alignItems: 'center',
           gap: 16,
-          paddingBottom: 16,
-          borderBottom: '1px solid var(--border)',
         }}
       >
         <ProfilePhoto employee={employee} />
@@ -169,32 +160,42 @@ export function EmployeeProfile({ employee, manager, backTo }: EmployeeProfilePr
         )}
         {employee.mobile_phone && (
           <DetailRow icon={<Mobile size={16} />}>
+            <span style={{ marginRight: 8, color: MUTED }}>Mobile</span>
             <a href={`tel:${employee.mobile_phone}`}>{employee.mobile_phone}</a>
-            <span style={{ marginLeft: 8, color: MUTED }}>Mobile</span>
           </DetailRow>
         )}
       </Section>
 
-      {managerLink && (
-        <div style={{ marginTop: 16 }}>
-          <DetailRow icon={<UserFollow size={16} />}>
-            Reports to {managerLink}
-          </DetailRow>
-        </div>
-      )}
-
-      <Button
-        as="a"
-        href={`https://w3.ibm.com/#/people/${employee.id}`}
-        target="_blank"
-        rel="noopener noreferrer"
-        kind="tertiary"
-        size="sm"
-        renderIcon={Launch}
-        style={{ marginTop: 16 }}
+      <div
+        style={{
+          marginTop: 16,
+          paddingTop: 16,
+          borderTop: '1px solid var(--border)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+        }}
       >
-        W3 Page
-      </Button>
+        <Button
+          as="a"
+          href={`https://w3.ibm.com/#/people/${employee.id}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          kind="tertiary"
+          size="sm"
+          renderIcon={Launch}
+        >
+          W3 Page
+        </Button>
+        {/* A button, not a link: it changes state rather than navigating. Clearing the
+            identity brings the startup gate back. Pushed to the right edge so it reads as
+            secondary to "W3 Page". */}
+        {onNotYou && (
+          <Button kind="ghost" size="xs" onClick={onNotYou} style={{ marginLeft: 'auto' }}>
+            Not you?
+          </Button>
+        )}
+      </div>
     </Tile>
   )
 }

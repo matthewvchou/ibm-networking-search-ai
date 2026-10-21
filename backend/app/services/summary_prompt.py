@@ -47,13 +47,24 @@ Reply with only a JSON object matching this schema, with no markdown fences and 
 {_EXTRACTION_SCHEMA}"""
 
 
-def build_prose_messages(resume_markdown: str, unsupported_claims: list[str] | None = None) -> list[dict[str, str]]:
+def build_prose_messages(
+    resume_markdown: str, unsupported_claims: list[str] | None = None, previous_summary: str | None = None
+) -> list[dict[str, str]]:
     """Builds the chat messages asking for the 2-sentence summary of `resume_markdown`.
 
     `unsupported_claims` are claims a grader rejected in the previous attempt; they are
-    listed so the model corrects them instead of re-rolling blindly.
+    listed so the model corrects them instead of re-rolling blindly. `previous_summary` is
+    the summary a manual regeneration is replacing; the model is asked for different
+    wording and emphasis, because the same prompt otherwise returns the same text.
     """
     system = _PROSE_SYSTEM_PROMPT
+    if previous_summary:
+        system += (
+            "\n\nThe reader has already seen this summary of the resume and asked for another one:\n"
+            f"{previous_summary}\n"
+            "Write a different summary: use different wording and, where the resume allows, "
+            "emphasize different parts of it. Every statement must still be stated outright in the resume."
+        )
     if unsupported_claims:
         listed = "\n".join(f"- {claim}" for claim in unsupported_claims)
         system += (

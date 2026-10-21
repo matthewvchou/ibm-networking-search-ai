@@ -143,9 +143,16 @@ class ResumeSummaryService:
         if markdown is None:
             self._cache.set(employee_id, None, _NO_RESUME_TTL_SECONDS)
             raise SummaryUnavailableException("no_resume", "No resume on file.", 404)
-        # The old summary stays on screen, so no draft is published for the new run.
-        fresh = await self._generator.generate(employee_id, markdown, is_prefetch=False, publish_draft=False)
         previous = self._cache.get(employee_id)
+        # The old summary stays on screen, so no draft is published for the new run; its
+        # text is passed along so the new prose is worded differently, not re-rolled.
+        fresh = await self._generator.generate(
+            employee_id,
+            markdown,
+            is_prefetch=False,
+            publish_draft=False,
+            previous_summary=previous.summary if isinstance(previous, ResumeSummary) else None,
+        )
         attempted_score = fresh.verification.score if fresh.verification else None
         if isinstance(previous, ResumeSummary) and _score_of(fresh) < _score_of(previous):
             return RegenerationResult(previous, replaced=False, attempted_score=attempted_score)

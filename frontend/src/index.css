@@ -30,6 +30,19 @@ body {
   margin-block: auto;
 }
 
+/* Carbon reserves ~63px on the right of an icon button for its absolutely-positioned icon
+   and pads the left by 15px, which leaves "Regenerate" visibly wider than its label. This
+   keeps the icon where Carbon puts it but trims both edges to 8px. The icon sits in an inner
+   span that an inline style cannot reach, hence a stylesheet rule; the doubled class
+   outranks Carbon's single-class padding whichever stylesheet loads last. */
+.cds--btn.regenerate-button {
+  padding-inline: 0.5rem 2rem;
+}
+
+.cds--btn.regenerate-button .cds--btn__icon {
+  inset-inline-end: 0.5rem;
+}
+
 .org-chart-canvas .rd3t-link {
   stroke: var(--border);
   stroke-width: 1.5px;
