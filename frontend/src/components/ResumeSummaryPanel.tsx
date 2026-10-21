@@ -116,7 +116,7 @@ export function ResumeSummaryPanel({ employeeId }: ResumeSummaryPanelProps) {
 function Header({ state }: { state: PanelState }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-      <h4 style={{ margin: 0, fontWeight: 600, color: 'var(--text-h)' }}>Resume Summary</h4>
+      <h4 style={{ margin: 0, fontWeight: 600, color: 'var(--text-h)' }}>AI Resume Summary</h4>
       {state.kind === 'loaded' && (
         <a
           href={state.data.resume_url}
