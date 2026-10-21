@@ -311,6 +311,16 @@ async def test_regenerate_keeps_the_previous_summary_when_the_new_score_is_lower
 
 
 @pytest.mark.asyncio
+async def test_regenerate_shows_the_model_the_summary_it_is_replacing():
+    summarizer = _FakeSummarizer()
+    service = _service(summarizer=summarizer)
+    await service.get_summary("A")
+    await service.regenerate("A")
+    assert "Designs cloud platforms." not in summarizer.prose_prompts[0]
+    assert "Designs cloud platforms." in summarizer.prose_prompts[-1]
+
+
+@pytest.mark.asyncio
 async def test_concurrent_regenerations_share_one_run():
     summarizer = _FakeSummarizer()
     service = _service(summarizer=summarizer)

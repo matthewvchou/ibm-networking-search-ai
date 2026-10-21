@@ -19,6 +19,8 @@ type PanelState =
 
 const POLL_INTERVAL_MS = 1000
 const muted = { color: 'var(--text)' }
+// Sets the accuracy check and Regenerate apart from the summary text above them.
+const footerStyle = { borderTop: '1px solid var(--border)', paddingTop: 16 }
 
 /**
  * The AI-generated resume summary for one employee. Fetches on its own, so the
@@ -82,7 +84,7 @@ export function ResumeSummaryPanel({ employeeId }: ResumeSummaryPanelProps) {
 
   return (
     <Tile style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <Header state={state} progress={progress} isRegenerating={isRegenerating} />
+      <Header state={state} />
 
       {state.kind === 'loading' && <LoadingBody progress={progress} draft={draft} />}
       {state.kind === 'no-resume' && <p style={{ ...muted, margin: 0 }}>No resume on file.</p>}
@@ -92,15 +94,16 @@ export function ResumeSummaryPanel({ employeeId }: ResumeSummaryPanelProps) {
       {state.kind === 'loaded' && (
         <>
           <SummaryBody summary={state.data.summary} />
-          <VerificationDetails verification={state.data.summary.verification} isVerifying={false} />
-          {isRegenerating && progress && <AttemptProgress progress={progress} />}
-          {!isRegenerating && (
-            <div>
-              <Button kind="tertiary" size="sm" renderIcon={Renew} onClick={regenerate}>
+          <div style={{ ...footerStyle, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <ScoreTag verification={state.data.summary.verification} isVerifying={isRegenerating} />
+            {!isRegenerating && (
+              <Button kind="tertiary" size="xs" className="regenerate-button" renderIcon={Renew} onClick={regenerate} style={{ marginLeft: 'auto' }}>
                 Regenerate
               </Button>
-            </div>
-          )}
+            )}
+          </div>
+          {isRegenerating && progress && <AttemptProgress progress={progress} />}
+          <VerificationDetails verification={state.data.summary.verification} />
         </>
       )}
       {notice && (
@@ -110,22 +113,10 @@ export function ResumeSummaryPanel({ employeeId }: ResumeSummaryPanelProps) {
   )
 }
 
-function Header({
-  state,
-  progress,
-  isRegenerating,
-}: {
-  state: PanelState
-  progress: SummaryProgress | null
-  isRegenerating: boolean
-}) {
-  const verification = state.kind === 'loaded' ? state.data.summary.verification : (progress?.draft?.verification ?? null)
-  const hasDraft = state.kind === 'loading' && progress?.draft != null
-  const isVerifying = isRegenerating || (hasDraft && !progress?.is_draft_verified)
+function Header({ state }: { state: PanelState }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-      <h4 style={{ margin: 0, color: 'var(--text-h)' }}>Resume summary</h4>
-      {(state.kind === 'loaded' || hasDraft) && <ScoreTag verification={verification} isVerifying={isVerifying} />}
+      <h4 style={{ margin: 0, fontWeight: 600, color: 'var(--text-h)' }}>Resume Summary</h4>
       {state.kind === 'loaded' && (
         <a
           href={state.data.resume_url}
@@ -147,7 +138,10 @@ function LoadingBody({ progress, draft }: { progress: SummaryProgress | null; dr
       {draft ? (
         <>
           <SummaryBody summary={draft} />
-          <VerificationDetails verification={draft.verification} isVerifying={!progress?.is_draft_verified} />
+          <div style={footerStyle}>
+            <ScoreTag verification={draft.verification} isVerifying={!progress?.is_draft_verified} />
+          </div>
+          <VerificationDetails verification={draft.verification} />
         </>
       ) : (
         <SkeletonText paragraph lineCount={4} />

@@ -21,8 +21,34 @@ interface ScoreTagProps {
   isVerifying: boolean
 }
 
-/** The grade tag for the panel header: green from 80, yellow from 60, red below. */
+/**
+ * The grade tag, green from 80, yellow from 60, red below, with the claim count inside it and
+ * an (i) beside it that explains the score. The explanation is a popup rather than a sentence
+ * on the page, but it must stay one click away: a bare percentage reads as the model's
+ * confidence in itself, which is not what it measures.
+ */
 export function ScoreTag({ verification, isVerifying }: ScoreTagProps) {
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+      <ScoreBadge verification={verification} isVerifying={isVerifying} />
+      {!isVerifying && verification !== null && verification.score !== null && (
+        <span style={{ fontSize: 12, color: 'var(--text)' }}>
+          ({verification.supported_claims} of {verification.total_claims} claims supported)
+        </span>
+      )}
+      <Toggletip align="bottom-left">
+        <ToggletipButton label="About this score">
+          <Information size={14} />
+        </ToggletipButton>
+        <ToggletipContent>
+          <p>{describe(verification, isVerifying)}</p>
+        </ToggletipContent>
+      </Toggletip>
+    </span>
+  )
+}
+
+function ScoreBadge({ verification, isVerifying }: ScoreTagProps) {
   if (isVerifying) {
     return (
       <Tag type="gray" size="sm" style={{ margin: 0 }}>
@@ -49,49 +75,23 @@ export function ScoreTag({ verification, isVerifying }: ScoreTagProps) {
   )
 }
 
-interface VerificationDetailsProps {
-  verification: Verification | null
-  isVerifying: boolean
-}
-
-/**
- * Says in words what the score is, and lists the claims the grader could not support.
- * The sentence is always visible rather than a tooltip: a bare percentage reads as the
- * model's confidence in itself, which is not what it measures.
- */
-export function VerificationDetails({ verification, isVerifying }: VerificationDetailsProps) {
+/** Lists the claims the grader could not support; renders nothing when there are none. */
+export function VerificationDetails({ verification }: { verification: Verification | null }) {
+  if (!verification || verification.flagged_claims.length === 0) return null
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      <p style={{ margin: 0, fontSize: 12, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: 4 }}>
-        <span>{describe(verification, isVerifying)}</span>
-        <Toggletip align="bottom-left">
-          <ToggletipButton label="About this score">
-            <Information size={14} />
-          </ToggletipButton>
-          <ToggletipContent>
-            <p>
-              A second AI model checked each claim in this summary against the resume text. It is that model's
-              opinion, not a guarantee. Open the original resume to be sure.
-            </p>
-          </ToggletipContent>
-        </Toggletip>
-      </p>
-      {verification && verification.flagged_claims.length > 0 && (
-        <Accordion align="start">
-          <AccordionItem title={`${verification.flagged_claims.length} claims couldn't be verified`}>
-            <ul style={{ margin: 0, paddingLeft: 20, listStyle: 'disc', display: 'flex', flexDirection: 'column', gap: 4 }}>
-              {verification.flagged_claims.map((flag) => (
-                <li key={`${flag.section}-${flag.claim}`} style={{ color: 'var(--text-h)' }}>
-                  <span style={{ color: 'var(--text)', textTransform: 'capitalize' }}>{flag.section}: </span>
-                  {flag.claim}
-                  {flag.removed && <span style={{ color: 'var(--text)' }}> (removed from the summary)</span>}
-                </li>
-              ))}
-            </ul>
-          </AccordionItem>
-        </Accordion>
-      )}
-    </div>
+    <Accordion align="start">
+      <AccordionItem title={`${verification.flagged_claims.length} claims couldn't be verified`}>
+        <ul style={{ margin: 0, paddingLeft: 20, listStyle: 'disc', display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {verification.flagged_claims.map((flag) => (
+            <li key={`${flag.section}-${flag.claim}`} style={{ color: 'var(--text-h)' }}>
+              <span style={{ color: 'var(--text)', textTransform: 'capitalize' }}>{flag.section}: </span>
+              {flag.claim}
+              {flag.removed && <span style={{ color: 'var(--text)' }}> (removed from the summary)</span>}
+            </li>
+          ))}
+        </ul>
+      </AccordionItem>
+    </Accordion>
   )
 }
 
@@ -100,9 +100,9 @@ function describe(verification: Verification | null, isVerifying: boolean): stri
   if (verification === null || verification.score === null) {
     return 'The AI grader could not check this summary against the actual resume.'
   }
-  const rewrites = verification.attempts > 1 ? ` after ${verification.attempts} attempts` : ''
+  const rewrites = verification.attempts > 1 ? ` The summary was rewritten until attempt ${verification.attempts}.` : ''
   return (
-    `An AI grader scored how well this summary matches the actual resume ` +
-    `(${verification.supported_claims} of ${verification.total_claims} claims supported${rewrites}).`
+    `A second AI model checked each claim in this summary against the resume text.${rewrites} ` +
+    `It is that model's opinion, not a guarantee. Open the original resume to be sure.`
   )
 }

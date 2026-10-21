@@ -108,12 +108,7 @@ export function EmployeeDetailView({ id, backTo, onNotFound, onNotYou }: Employe
           {error && <InlineNotification kind="error" title="Couldn't load employee" subtitle={error} hideCloseButton />}
 
           {employee && (
-            <EmployeeProfile
-              employee={employee}
-              manager={managerChain[1] ?? null}
-              backTo={backTo}
-              onNotYou={onNotYou}
-            />
+            <EmployeeProfile employee={employee} onNotYou={onNotYou} />
           )}
         </div>
 

@@ -97,7 +97,9 @@ export function SuggestionsSection({ employeeId }: SuggestionsSectionProps) {
 
       <div style={{ marginTop: 16 }}>
         {people.length > 0 && <PeopleRow people={people} onSelect={(id) => navigate(`/employee/${id}`)} />}
-        {isSearching && <SkeletonText paragraph lineCount={2} />}
+        {/* Only until the first cards arrive: later batches can take 30s+ each, and a bar
+            under a row the user is already reading looks stuck. */}
+        {isSearching && people.length === 0 && <SkeletonText paragraph lineCount={2} />}
         {hasAllFailed && (
           <InlineNotification
             kind="error"

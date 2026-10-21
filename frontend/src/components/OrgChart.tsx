@@ -599,7 +599,7 @@ export function OrgChart({ managerChain, orgNode, peers, selectedId, selfEmploye
           flexWrap: 'wrap',
         }}
       >
-        <h3 style={{ margin: 0, fontSize: 18, fontWeight: 600, color: 'var(--text-h)' }}>Org chart</h3>
+        <h3 style={{ margin: 0, fontSize: 18, fontWeight: 600, color: 'var(--text-h)' }}>Organization Chart</h3>
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
           <Button
             kind="ghost"

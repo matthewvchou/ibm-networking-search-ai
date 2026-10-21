@@ -32,6 +32,13 @@ def test_prose_messages_list_rejected_claims_as_feedback():
     assert "Led the cloud migration" not in build_prose_messages("# Ada")[0]["content"]
 
 
+def test_prose_messages_show_the_previous_summary_and_ask_for_a_different_one():
+    messages = build_prose_messages("# Ada", previous_summary="They design cloud platforms.")
+    assert "They design cloud platforms." in messages[0]["content"]
+    assert "different" in messages[0]["content"]
+    assert "They design cloud platforms." not in build_prose_messages("# Ada")[0]["content"]
+
+
 def test_parse_prose_accepts_plain_json_and_a_markdown_fence():
     reply = json.dumps({"summary": "Designs platforms. Builds services."})
     assert parse_prose(reply).summary == "Designs platforms. Builds services."

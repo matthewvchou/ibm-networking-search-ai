@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { Button, InlineNotification, Search, SkeletonText } from '@carbon/react'
+import { useNavigate } from 'react-router'
 import { searchEmployees } from '../api/client'
 import type { Employee } from '../api/client'
 import { errorMessage } from '../api/errors'
@@ -16,11 +17,17 @@ interface IdentityPickerProps {
 /** Asks who the user is: a name search whose result cards each pick that person when clicked. */
 export function IdentityPicker({ canSkip }: IdentityPickerProps) {
   const { setIdentity, skipGate } = useIdentity()
+  const navigate = useNavigate()
   const [inputValue, setInputValue] = useState('')
   const [searchedFor, setSearchedFor] = useState('')
   const [results, setResults] = useState<Employee[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  function pickEmployee(employee: Employee) {
+    setIdentity({ id: employee.id, name: employee.display_name })
+    navigate('/profile')
+  }
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -106,7 +113,7 @@ export function IdentityPicker({ canSkip }: IdentityPickerProps) {
             <EmployeeCard
               key={employee.id}
               employee={employee}
-              onClick={() => setIdentity({ id: employee.id, name: employee.display_name })}
+              onClick={() => pickEmployee(employee)}
             />
           ))}
         </div>

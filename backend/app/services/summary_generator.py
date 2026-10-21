@@ -61,17 +61,23 @@ class SummaryGenerator:
         self._verify_slots = asyncio.Semaphore(_VERIFY_CONCURRENCY)
 
     async def generate(
-        self, employee_id: str, resume_markdown: str, is_prefetch: bool, publish_draft: bool
+        self,
+        employee_id: str,
+        resume_markdown: str,
+        is_prefetch: bool,
+        publish_draft: bool,
+        previous_summary: str | None = None,
     ) -> ResumeSummary:
         """Returns the best summary found, with its verification (None if never graded).
 
         `publish_draft` shows the first, ungraded attempt on the progress board; a manual
-        regeneration passes False because the previous summary stays on screen. Raises
-        SummaryUnavailableException if the first attempt cannot be written.
+        regeneration passes False because the previous summary stays on screen. That
+        regeneration also passes `previous_summary` (its prose) so the new prose differs.
+        Raises SummaryUnavailableException if the first attempt cannot be written.
         """
         self._progress.start(employee_id, MAX_ATTEMPTS)
         try:
-            summary = await self._attempt_loop(employee_id, resume_markdown, is_prefetch, publish_draft)
+            summary = await self._attempt_loop(employee_id, resume_markdown, is_prefetch, publish_draft, previous_summary)
         except BaseException:
             self._progress.clear(employee_id)
             raise
@@ -79,7 +85,7 @@ class SummaryGenerator:
         return summary
 
     async def _attempt_loop(
-        self, employee_id: str, markdown: str, is_prefetch: bool, publish_draft: bool
+        self, employee_id: str, markdown: str, is_prefetch: bool, publish_draft: bool, previous_summary: str | None
     ) -> ResumeSummary:
         best: ResumeSummary | None = None
         feedback: list[str] = []
@@ -90,7 +96,7 @@ class SummaryGenerator:
         for attempt in range(1, MAX_ATTEMPTS + 1):
             self._progress.update(employee_id, attempt=attempt, phase="summarizing")
             try:
-                summary = await self._compose(markdown, is_prefetch, feedback, extraction)
+                summary = await self._compose(markdown, is_prefetch, feedback, extraction, previous_summary)
             except SummaryUnavailableException:
                 if best is None:
                     raise
@@ -134,9 +140,16 @@ class SummaryGenerator:
         return _finalize(best, attempts_used)
 
     async def _compose(
-        self, markdown: str, is_prefetch: bool, feedback: list[str], extraction: ResumeExtraction | None
+        self,
+        markdown: str,
+        is_prefetch: bool,
+        feedback: list[str],
+        extraction: ResumeExtraction | None,
+        previous_summary: str | None,
     ) -> ResumeSummary:
-        prose_call = self._request(build_prose_messages(markdown, feedback), parse_prose, is_prefetch)
+        prose_call = self._request(
+            build_prose_messages(markdown, feedback, previous_summary), parse_prose, is_prefetch
+        )
         if extraction is not None:
             prose = await prose_call
             return _combine(prose, extraction)
